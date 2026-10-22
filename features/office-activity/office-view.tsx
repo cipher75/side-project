@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
+import { formatAge, type StaleMachine } from "./hosted/compose";
 import { OfficeScene } from "./scene/office-scene";
 import { KIND_STYLE, SPRITE_HEIGHT, SPRITE_WIDTH, drawSprite, lookFor } from "./scene/sprite";
 import { emptyOfficeState } from "./session-state";
@@ -15,18 +16,49 @@ import type { CharacterKind, OfficeState, Session } from "./types";
 // 사무실 화면: 서버가 보내는 상태를 구독해 세션마다 사무실을 보여준다. 화면은 보기 전용이다.
 export function OfficeView() {
   const { state, link, restarted, acknowledgeRestart } = useOfficeState();
+  return (
+    <OfficeBoard
+      state={state}
+      link={link}
+      restarted={restarted}
+      onAcknowledgeRestart={acknowledgeRestart}
+      subtitle="이 PC에서 연결한 Claude Code · 데스크톱 세션의 활동을 보여줍니다"
+    />
+  );
+}
+
+export type OfficeBoardProps = {
+  state: OfficeState;
+  link: Link;
+  restarted: boolean;
+  onAcknowledgeRestart: () => void;
+  subtitle: string;
+  // 호스팅 화면에서 소식이 끊긴 PC와, 그 PC에 속한 세션이 끊긴 지 얼마나 됐는지(초)
+  staleMachines?: StaleMachine[];
+  staleSessions?: Record<string, number>;
+};
+
+// 같은 사무실 장면을 로컬 화면과 호스팅 화면이 함께 쓴다. 상태가 어디서 오는지는 이 안에서 모른다.
+export function OfficeBoard({
+  state,
+  link,
+  restarted,
+  onAcknowledgeRestart,
+  subtitle,
+  staleMachines = [],
+  staleSessions = {},
+}: OfficeBoardProps) {
   const [picked, setPicked] = useState<string | null>(null);
   const selectedId = picked && state.sessions[picked] ? picked : state.order[0];
   const session = selectedId ? state.sessions[selectedId] : undefined;
+  const selectedStale = selectedId ? staleSessions[selectedId] : undefined;
 
   return (
     <div className="flex flex-col gap-4">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
           <h1 className="font-heading text-xl font-semibold tracking-tight">Claude 사무실</h1>
-          <p className="text-sm text-muted-foreground">
-            이 PC에서 연결한 Claude Code · 데스크톱 세션의 활동을 보여줍니다
-          </p>
+          <p className="text-sm text-muted-foreground">{subtitle}</p>
         </div>
         {session ? <SessionBadges session={session} /> : null}
       </header>
@@ -37,8 +69,14 @@ export function OfficeView() {
           Claude Code나 앱에서 확인해 주세요.
         </Notice>
       ) : null}
+      {staleMachines.map((lost) => (
+        <Notice key={lost.machine} tone="danger">
+          PC({lost.machine})에서 소식이 끊겼어요 · 마지막 상태 {formatAge(lost.ageSec)} 전. 지금 상태를 알 수 없으니
+          Claude Code나 앱에서 확인해 주세요.
+        </Notice>
+      ))}
       {restarted ? (
-        <Notice tone="warning" action={<Button size="sm" variant="outline" onClick={acknowledgeRestart}>확인했어요</Button>}>
+        <Notice tone="warning" action={<Button size="sm" variant="outline" onClick={onAcknowledgeRestart}>확인했어요</Button>}>
           사무실 서버가 다시 켜졌어요. 그전에 떠 있던 허용 대기는 이 화면에서 사라졌을 수 있으니 Claude Code나 앱에서
           확인해 주세요.
         </Notice>
@@ -52,7 +90,7 @@ export function OfficeView() {
                 <StatusDot session={state.sessions[id]} />
                 {state.sessions[id].name}
                 <span className="text-xs font-normal text-muted-foreground">
-                  {statusText(state.sessions[id])}
+                  {staleSessions[id] !== undefined ? "소식 끊김" : statusText(state.sessions[id])}
                 </span>
               </TabsTrigger>
             ))}
@@ -67,7 +105,13 @@ export function OfficeView() {
         lit={session?.lit ?? false}
         hadWork={(session?.doneCount ?? 0) > 0}
         connected={Boolean(session?.connected)}
-        alert={link === "lost" ? "연결이 끊겨 지금 상태를 알 수 없어요" : undefined}
+        alert={
+          link === "lost"
+            ? "연결이 끊겨 지금 상태를 알 수 없어요"
+            : selectedStale !== undefined
+              ? "PC에서 소식이 끊겨 지금 상태를 알 수 없어요"
+              : undefined
+        }
       />
 
       {session ? (
@@ -87,8 +131,8 @@ export function OfficeView() {
   );
 }
 
-// connecting: 처음 연결하는 중, open: 연결됨, lost: 끊김(브라우저가 알아서 다시 연결을 시도한다)
-type Link = "connecting" | "open" | "lost";
+// connecting: 처음 연결하는 중, open: 연결됨, lost: 끊김(스스로 다시 연결을 시도한다)
+export type Link = "connecting" | "open" | "lost";
 
 // 서버가 보내는 상태를 구독한다. 연결이 끊기면 화면이 멈춘 채 정상처럼 보이지 않도록 알리고,
 // 서버가 다시 켜진 것(instance가 바뀜)을 알아채면 사용자가 확인할 때까지 알린다.
