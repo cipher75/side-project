@@ -164,6 +164,14 @@
   background: #ffe0dc;
 }
 
+.glad {
+  background: #dcf5d0;
+}
+
+.stop {
+  background: #e6e8ee;
+}
+
 @container (max-width: 480px) {
   .ask span {
     display: none;
@@ -196,4 +204,10 @@
   white-space: nowrap;
   transform: translateX(-50%);
   transition: opacity 0.5s;
+}
+
+.alert {
+  z-index: 10000;
+  border: 2px solid #fff;
+  background: rgba(176, 32, 32, 0.92);
 }

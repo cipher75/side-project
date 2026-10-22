@@ -8,11 +8,15 @@ const work = (id: string, label = `Read · ${id}`): SceneCharacter => ({
 });
 const waiting = (id: string): SceneCharacter => ({ ...work(id), status: "waiting" });
 const denied = (id: string): SceneCharacter => ({ ...work(id), status: "denied" });
+const approved = (id: string): SceneCharacter => ({ ...work(id), status: "approved" });
 
 // 난수를 순환하는 고정 수열로 바꿔 움직임을 예측할 수 있게 한다.
+// 빈 사무실을 한 번 맞춰 두어, 이후 들어오는 캐릭터가 새 호출로 다뤄지게 한다.
 function engine() {
   let n = 0;
-  return new SceneEngine(() => (n = (n + 0.21) % 1));
+  const e = new SceneEngine(() => (n = (n + 0.21) % 1));
+  e.sync([], false);
+  return e;
 }
 
 function run(e: SceneEngine, seconds: number) {
@@ -93,6 +97,58 @@ describe("허용 대기", () => {
     run(e, 2);
 
     expect(walker(e, "a")).toMatchObject({ bubble: "work", expr: "happy", moving: true });
+  });
+});
+
+describe("허용 후 완료", () => {
+  test("서버가 허용됨으로 정한 캐릭터는 밝은 표정으로 바뀐 뒤 출입문으로 나간다", () => {
+    const e = engine();
+    e.sync([waiting("a")], true);
+    run(e, 15);
+
+    e.sync([approved("a")], true);
+    expect(walker(e, "a")).toMatchObject({ expr: "happy", bubble: "glad", moving: false });
+    run(e, 3);
+    expect(walker(e, "a").x).toBeLessThan(SLOTS[0].x);
+
+    run(e, 15);
+    expect(e.walkers).toEqual([]);
+  });
+
+  test("허용 여부를 모른 채 목록에서 빠진 허용 대기 캐릭터는 허용됨을 띄우지 않고 ?만 지운 채 나간다", () => {
+    const e = engine();
+    e.sync([waiting("a")], true);
+    run(e, 15);
+
+    e.sync([], true);
+    expect(walker(e, "a")).toMatchObject({ expr: "happy", bubble: "work", moving: true });
+  });
+});
+
+describe("거절이 아닌 중단", () => {
+  test("중단된 캐릭터는 담담한 표정으로 잠깐 멈췄다가 출입문으로 나간다", () => {
+    const e = engine();
+    e.sync([waiting("a")], true);
+    run(e, 15);
+
+    e.sync([{ ...work("a"), status: "cancelled" }], true);
+    expect(walker(e, "a")).toMatchObject({ expr: "plain", bubble: "stop", moving: false });
+    run(e, 3);
+    expect(walker(e, "a").x).toBeLessThan(SLOTS[0].x);
+
+    run(e, 15);
+    expect(e.walkers).toEqual([]);
+  });
+});
+
+describe("장면을 처음 맞출 때", () => {
+  test("이미 있던 캐릭터는 출입문으로 들어오지 않고 제자리에 바로 선다", () => {
+    const e = new SceneEngine(() => 0.5);
+    e.sync([waiting("a"), work("b")], true);
+
+    expect(walker(e, "a")).toMatchObject({ x: SLOTS[0].x, y: SLOTS[0].y, moving: false, bubble: "ask" });
+    expect(walker(e, "b")).toMatchObject({ moving: false });
+    expect(walker(e, "b").y).not.toBe(DOOR.y);
   });
 });
 

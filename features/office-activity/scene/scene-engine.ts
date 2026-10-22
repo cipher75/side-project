@@ -10,8 +10,8 @@ export type SceneCharacter = {
   label: string;
 };
 
-export type Expression = "happy" | "confused" | "sad";
-export type BubbleStyle = "work" | "ask" | "sad";
+export type Expression = "happy" | "confused" | "sad" | "plain";
+export type BubbleStyle = "work" | "ask" | "sad" | "glad" | "stop";
 
 export type Walker = {
   id: string;
@@ -27,7 +27,7 @@ export type Walker = {
   fading: boolean;
 };
 
-type Phase = "to-work" | "idle" | "to-wait" | "waiting" | "sad" | "leaving";
+type Phase = "to-work" | "idle" | "to-wait" | "waiting" | "sad" | "glad" | "stop" | "leaving";
 
 type Internal = Walker & {
   phase: Phase;
@@ -41,6 +41,8 @@ type Internal = Walker & {
 const LIGHTS_OFF_DELAY = 1.5;
 const FADE_OUT = 0.4;
 const SAD_PAUSE = 1.2;
+const GLAD_PAUSE = 1.2;
+const STOP_PAUSE = 1.2;
 const FRAME_TIME = 0.17;
 
 export class SceneEngine {
@@ -48,6 +50,7 @@ export class SceneEngine {
   private departed = new Set<string>();
   private serverLit = false;
   private emptyTime = 0;
+  private synced = false;
   lit = false;
 
   constructor(private readonly rng: () => number = Math.random) {}
@@ -58,6 +61,9 @@ export class SceneEngine {
 
   sync(characters: SceneCharacter[], serverLit: boolean): void {
     this.serverLit = serverLit;
+    // 장면을 처음 맞출 때 이미 있던 캐릭터는 새로 들어온 것이 아니므로 제자리에 바로 세운다.
+    const placed = !this.synced;
+    this.synced = true;
     const ids = new Set(characters.map((c) => c.id));
     this.departed.forEach((id) => {
       if (!ids.has(id)) this.departed.delete(id);
@@ -67,7 +73,7 @@ export class SceneEngine {
       if (this.departed.has(character.id)) continue;
       const walker = this.items.find((w) => w.id === character.id);
       if (walker) this.update(walker, character);
-      else this.spawn(character);
+      else this.spawn(character, placed);
     }
     for (const walker of this.items) {
       if (!ids.has(walker.id) && walker.phase !== "leaving") this.leave(walker);
@@ -90,7 +96,7 @@ export class SceneEngine {
     this.emptyTime = 0;
   }
 
-  private spawn(character: SceneCharacter) {
+  private spawn(character: SceneCharacter, placed = false) {
     const walker: Internal = {
       id: character.id,
       kind: character.kind,
@@ -112,12 +118,20 @@ export class SceneEngine {
     };
     this.items.push(walker);
     this.update(walker, character, true);
+    if (placed && walker.moving) {
+      walker.x = walker.goal.x;
+      walker.y = walker.goal.y;
+      walker.moving = false;
+      this.arrive(walker);
+    }
   }
 
   private update(w: Internal, c: SceneCharacter, isNew = false) {
     w.label = c.label;
     if (c.status === "waiting" && w.phase !== "to-wait" && w.phase !== "waiting") this.goWait(w);
     else if (c.status === "denied" && w.phase !== "sad" && w.phase !== "leaving") this.startSad(w);
+    else if (c.status === "approved" && w.phase !== "glad" && w.phase !== "leaving") this.startGlad(w);
+    else if (c.status === "cancelled" && w.phase !== "stop" && w.phase !== "leaving") this.startStop(w);
     else if (c.status === "working" && (isNew || w.phase === "to-wait" || w.phase === "waiting")) this.goWork(w);
   }
 
@@ -144,7 +158,31 @@ export class SceneEngine {
     w.phase = "sad";
   }
 
+  // 거절은 아니지만 실행되지 않고 끝난 호출(중단, 만료 등). 담담한 표정으로 잠깐 멈췄다가 나간다.
+  private startStop(w: Internal) {
+    w.expr = "plain";
+    w.bubble = "stop";
+    w.slot = -1;
+    w.moving = false;
+    w.pause = STOP_PAUSE;
+    w.phase = "stop";
+  }
+
+  private startGlad(w: Internal) {
+    w.expr = "happy";
+    w.bubble = "glad";
+    w.slot = -1;
+    w.moving = false;
+    w.pause = GLAD_PAUSE;
+    w.phase = "glad";
+  }
+
   private leave(w: Internal) {
+    // 허용 여부를 모른 채 나가는 경우(세션 종료 등)에는 ?를 지우고 평소 모습으로 나간다.
+    if (w.bubble === "ask") {
+      w.expr = "happy";
+      w.bubble = "work";
+    }
     w.slot = -1;
     this.walkTo(w, DOOR_OUTSIDE, "leaving");
   }
@@ -159,7 +197,7 @@ export class SceneEngine {
     if (w.phase === "idle") {
       w.pause -= dt;
       if (w.pause <= 0) this.walkTo(w, this.pickWaypoint(w), "to-work");
-    } else if (w.phase === "sad") {
+    } else if (w.phase === "sad" || w.phase === "glad" || w.phase === "stop") {
       w.pause -= dt;
       if (w.pause <= 0) this.leave(w);
     }
