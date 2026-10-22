@@ -1,0 +1,199 @@
+/* 사무실 장면: 논리 좌표 1칸(--p)을 화면 너비의 1/320로 잡아 크기와 위치를 정한다. */
+.scene {
+  position: relative;
+  container-type: inline-size;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #2b1d14;
+}
+
+.scene > * {
+  --p: calc(100cqw / 320);
+}
+
+.bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  display: block;
+}
+
+.layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.sign {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 1px 6px;
+  border: 2px solid #2b1d14;
+  border-radius: 3px;
+  background: #5a3d24;
+  color: #fff7dc;
+  font-size: clamp(9px, calc(var(--p) * 3.8), 14px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.signRoom {
+  background: #2f5d8a;
+}
+
+.signExit {
+  background: #8a2f2f;
+}
+
+.char {
+  position: absolute;
+  left: calc(var(--x) * var(--p));
+  top: calc(var(--y) * var(--p));
+  width: calc(24 * var(--p));
+  height: calc(34 * var(--p));
+  transform: translate(-50%, -100%);
+  transition: opacity 0.35s;
+}
+
+.char canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+
+.bob canvas {
+  animation: bob 0.9s steps(2, end) infinite;
+}
+
+.fading {
+  opacity: 0;
+}
+
+@keyframes bob {
+  100% {
+    transform: translateY(calc(var(--p) * -1.2));
+  }
+}
+
+.bubble {
+  position: absolute;
+  left: calc(var(--x) * var(--p));
+  top: calc((var(--y) - 35) * var(--p));
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border: 2px solid #2b1d14;
+  border-radius: 5px;
+  background: #fffdf3;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.28);
+  color: #2b1d14;
+  font-size: clamp(10px, calc(var(--p) * 4.1), 14px);
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+  transform: translate(-50%, -100%);
+  transition: opacity 0.35s;
+}
+
+.bubble::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid #2b1d14;
+  border-top: 0;
+  border-left: 0;
+  background: inherit;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.edgeLeft {
+  transform: translate(-18%, -100%);
+}
+
+.edgeLeft::after {
+  left: 18%;
+}
+
+.edgeRight {
+  transform: translate(-82%, -100%);
+}
+
+.edgeRight::after {
+  left: 82%;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border: 1px solid #2b1d14;
+  border-radius: 2px;
+  background: var(--kind);
+}
+
+.ask {
+  flex-direction: column;
+  gap: 0;
+  padding: 1px 8px 2px;
+  background: #fff3b0;
+}
+
+.ask b {
+  color: #b25a00;
+  font-size: clamp(16px, calc(var(--p) * 8), 30px);
+  line-height: 1;
+}
+
+.ask span {
+  font-size: clamp(9px, calc(var(--p) * 3.4), 12px);
+  font-weight: 600;
+}
+
+.sad {
+  background: #ffe0dc;
+}
+
+@container (max-width: 480px) {
+  .ask span {
+    display: none;
+  }
+}
+
+.night {
+  position: absolute;
+  inset: 0;
+  background: rgba(6, 9, 40, 0.72);
+  opacity: 0;
+  transition: opacity 1s;
+  pointer-events: none;
+}
+
+.off .night {
+  opacity: 1;
+}
+
+.note {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--p) * 8);
+  padding: 4px 14px;
+  border-radius: 99px;
+  background: rgba(20, 22, 40, 0.82);
+  color: #fff;
+  font-size: clamp(11px, calc(var(--p) * 4.2), 15px);
+  font-weight: 600;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  transition: opacity 0.5s;
+}
