@@ -1,0 +1,701 @@
+<!--
+  prototype shell: the review chrome every prototype starts from.
+
+  Keep this comment in the prototype you grow from here: it is the contract,
+  and later turns work from that file rather than from this one.
+
+  Contract (extend product screens; keep the review shell):
+  - Product:  .sh-stage contains only end-user product UI. Keep review notes,
+               rationale, instructions, and approval controls in conversation.
+  - Screens:  <section data-screen="slug" data-title="Label"> inside .sh-stage.
+               The selector, arrow keys, and #hash routing build themselves.
+               Use one option per product destination or distinct surface,
+               named by its product role. Keep baselines, variants, comparison
+               labels, steps, indexes, and progress out of names and states.
+               Links may use href="#slug".
+  - States:   "Default" is automatic. A screen declares only representative
+               presets in data-states="Empty,Error". Use natural, screen-specific
+               names. Reserve presets for important multi-step results, forced
+               data or errors, or materially different structure; keep one-click
+               and transient states as interactions. Use data-when="Empty" on
+               preset-only elements. Call prototypeShell.setState("Name") on
+               entry and setState("Default") on exit, including when repeated
+               actions cross a preset condition.
+  - Viewport: "vp (m)" cycles full / 390 / 768. The 390 preset is a
+               fixed-height, internally scrolling phone frame. Start a
+               mobile-first prototype by adding class="sh-vp-390" to <body>
+               (or a bootstrap classList.add before the chrome script runs).
+  - Pinning:  keep in-frame bars (tab bars, CTAs) inside the phone with
+               position: sticky; position: fixed pins to the browser window.
+  - Tokens:   replace the project-tokens block with project tokens copied
+               verbatim. Map differing names to --background, --foreground, and
+               --font afterwards; replace network fonts with a system stack and
+               note that substitution. Without a design system, keep this
+               palette as the finished style. When the project ships dark
+               tokens, copy them under .sh-theme-dark, which the shell sets
+               on both the root element and body, so :root.sh-theme-dark and
+               body.sh-theme-dark work too. A .dark class or a
+               prefers-color-scheme media query copied verbatim would follow
+               the reviewer's system instead of the toggle.
+  - Theme:    the light / dark switch (t) changes the product surface only.
+               It appears only when a .sh-theme-dark rule declares dark tokens,
+               so a prototype without them carries no theme control. Prototypes
+               always load light; the review bar keeps its own dark styling in
+               both themes so it still reads as chrome.
+  - Placeholders: .wf-pic stands in for pictures the prototype has no real
+               files for. Use real text everywhere text belongs.
+
+  - Chrome:   Keep exactly the screen selector, selected-screen state selector,
+               viewport cycle, and theme toggle.
+
+  Self-contained by design: no build, no framework, no network.
+
+  Font note: the project font (Raleway via next/font) is replaced by a system stack.
+-->
+<meta charset="utf-8">
+<title>Prototype</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ── project tokens (app/globals.css), copied verbatim ── */
+  :root {
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.147 0.004 49.25);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.147 0.004 49.25);
+    --primary: oklch(0.488 0.243 264.376);
+    --primary-foreground: oklch(0.97 0.014 254.604);
+    --secondary: oklch(0.967 0.001 286.375);
+    --secondary-foreground: oklch(0.21 0.006 285.885);
+    --muted: oklch(0.97 0.001 106.424);
+    --muted-foreground: oklch(0.553 0.013 58.071);
+    --accent: oklch(0.97 0.001 106.424);
+    --accent-foreground: oklch(0.216 0.006 56.043);
+    --destructive: oklch(0.577 0.245 27.325);
+    --border: oklch(0.923 0.003 48.717);
+    --input: oklch(0.923 0.003 48.717);
+    --ring: oklch(0.709 0.01 56.259);
+    --radius: 0.875rem;
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.147 0.004 49.25);
+    --font: system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  }
+  .sh-theme-dark {
+    --background: oklch(0.147 0.004 49.25);
+    --foreground: oklch(0.985 0.001 106.423);
+    --card: oklch(0.216 0.006 56.043);
+    --card-foreground: oklch(0.985 0.001 106.423);
+    --primary: oklch(0.424 0.199 265.638);
+    --primary-foreground: oklch(0.97 0.014 254.604);
+    --secondary: oklch(0.274 0.006 286.033);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.268 0.007 34.298);
+    --muted-foreground: oklch(0.709 0.01 56.259);
+    --accent: oklch(0.268 0.007 34.298);
+    --accent-foreground: oklch(0.985 0.001 106.423);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.553 0.013 58.071);
+  }
+
+  /* ── review chrome (sh-*): keep; extend product styles elsewhere ── */
+  * { box-sizing: border-box }
+  body {
+    margin: 0; padding: 0 0 40px;
+    background: var(--background, #f6f6f6); color: var(--foreground, #3a3a3a);
+    font-family: var(--font, system-ui, sans-serif);
+  }
+  .sh-bar {
+    position: sticky; top: 0; z-index: 999;
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    padding: 8px 12px; background: #191a1c; color: #d7d7d7;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .sh-bar b, .sh-control-label { color: #8a8f98; font-weight: 500 }
+  .sh-control { display: inline-flex; gap: 5px; align-items: center }
+  .sh-bar button {
+    border: 1px solid #3a3d42; background: none; color: inherit;
+    font: inherit; padding: 2px 9px; border-radius: 99px; cursor: pointer;
+  }
+  .sh-bar select {
+    width: 170px; border: 1px solid #3a3d42; background: #232428; color: inherit;
+    font: inherit; padding: 3px 28px 3px 9px; border-radius: 7px; cursor: pointer;
+    color-scheme: dark;
+  }
+  #sh-screen { width: 190px }
+  .sh-bar button.on { background: #d7d7d7; color: #191a1c; border-color: #d7d7d7 }
+  .sh-theme { display: inline-flex; border: 1px solid #3a3d42; border-radius: 99px; overflow: hidden }
+  .sh-theme button { border: 0; border-radius: 0; padding: 2px 10px }
+  .sh-spacer { flex: 1 }
+  .sh-stage { max-width: 960px; margin: 0 auto; padding: 12px 16px 0 }
+  [hidden] { display: none !important }
+
+  /* viewport presets */
+  .sh-vp-390 .sh-stage {
+    max-width: 390px; background: var(--background, #f6f6f6);
+    border: 10px solid #191a1c; border-radius: 28px;
+    padding: 16px 12px; height: min(844px, calc(100dvh - 52px));
+    overflow-y: auto; margin-top: 12px;
+  }
+  .sh-vp-768 .sh-stage {
+    max-width: 768px; border: 1px solid #c4c4c4; border-radius: 12px;
+    padding: 16px; margin-top: 12px;
+  }
+
+  /* placeholders */
+  .wf-pic  { border-radius: 4px; background:
+             repeating-linear-gradient(45deg, #e9e9e9, #e9e9e9 6px, #f2f2f2 6px, #f2f2f2 12px) }
+  .sh-theme-dark .wf-pic { background: repeating-linear-gradient(45deg,
+             color-mix(in srgb, var(--foreground) 16%, transparent) 0 6px,
+             color-mix(in srgb, var(--foreground) 8%, transparent) 6px 12px) }
+
+  /* ── product: office activity view ── */
+  .app { display: flex; flex-direction: column; gap: 12px }
+  .app-head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between }
+  .app-title { font-size: 1.05rem; font-weight: 700; margin: 0; letter-spacing: -0.01em }
+  .app-sub { font-size: 0.8rem; color: var(--muted-foreground); margin: 2px 0 0 }
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px }
+  .tab {
+    display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px;
+    border: 1px solid var(--border); border-radius: calc(var(--radius) * 0.8);
+    background: var(--card); color: var(--card-foreground); font: inherit; font-size: 0.82rem;
+    cursor: pointer;
+  }
+  .tab[aria-selected="true"] { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary) }
+  .tab .dot { width: 8px; height: 8px; border-radius: 99px; background: var(--muted-foreground) }
+  .tab .dot.work { background: #34c26b }
+  .tab .dot.ask { background: #f5b301 }
+  .tab .dot.off { background: var(--muted-foreground); opacity: .5 }
+  .tab small { opacity: .8; font-size: 0.72rem }
+  .badges { display: flex; flex-wrap: wrap; gap: 6px }
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px; padding: 2px 10px; border-radius: 99px;
+    font-size: 0.76rem; font-weight: 600; background: var(--secondary); color: var(--secondary-foreground);
+  }
+  .badge.primary { background: var(--primary); color: var(--primary-foreground) }
+  .badge.ask { background: #fff3c4; color: #5b4300 }
+  .sh-theme-dark .badge.ask { background: #5b4300; color: #ffe9a3 }
+
+  .scene {
+    position: relative; container-type: inline-size; width: 100%; aspect-ratio: 16 / 9;
+    border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: #2b1d14;
+  }
+  .scene > * { --p: calc(100cqw / 320) }
+  .scene canvas.bg { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; display: block }
+  .layer { position: absolute; inset: 0; pointer-events: none }
+  .sign {
+    position: absolute; transform: translate(-50%, -50%);
+    font-size: clamp(9px, calc(var(--p) * 3.8), 14px); font-weight: 700; color: #fff7dc;
+    background: #5a3d24; border: 2px solid #2b1d14; border-radius: 3px; padding: 1px 6px; white-space: nowrap;
+    letter-spacing: -0.02em;
+  }
+  .sign.room { background: #2f5d8a }
+  .sign.exit { background: #8a2f2f }
+  .char {
+    position: absolute; left: calc(var(--x) * var(--p)); top: calc(var(--y) * var(--p));
+    width: calc(24 * var(--p)); height: calc(34 * var(--p)); transform: translate(-50%, -100%);
+    transition: opacity .35s;
+  }
+  .char canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated }
+  .char.bob canvas { animation: bob .9s steps(2, end) infinite }
+  @keyframes bob { 0% { transform: translateY(0) } 100% { transform: translateY(calc(var(--p) * -1.2)) } }
+  .char.gone { opacity: 0 }
+  .bubble {
+    position: absolute; left: calc(var(--x) * var(--p)); top: calc((var(--y) - 35) * var(--p));
+    transform: translate(-50%, -100%); transition: opacity .35s;
+    background: #fffdf3; color: #2b1d14; border: 2px solid #2b1d14; border-radius: 5px;
+    box-shadow: 0 2px 0 rgba(0, 0, 0, .28); padding: 2px 7px;
+    font-size: clamp(10px, calc(var(--p) * 4.1), 14px); font-weight: 600; white-space: nowrap; line-height: 1.35;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .bubble.l { transform: translate(-18%, -100%) }
+  .bubble.r { transform: translate(-82%, -100%) }
+  .bubble::after {
+    content: ""; position: absolute; left: 50%; bottom: -6px; width: 8px; height: 8px;
+    background: #fffdf3; border: 2px solid #2b1d14; border-top: 0; border-left: 0; transform: translateX(-50%) rotate(45deg);
+  }
+  .bubble.l::after { left: 18% }
+  .bubble.r::after { left: 82% }
+  .bubble i { width: 8px; height: 8px; border-radius: 2px; flex: none; background: var(--k, #888); border: 1px solid #2b1d14 }
+  .bubble.ask { flex-direction: column; gap: 0; background: #fff3b0; padding: 1px 8px 2px; animation: pulse 1.1s ease-in-out infinite }
+  .bubble.ask::after { background: #fff3b0 }
+  .bubble.ask b { font-size: clamp(16px, calc(var(--p) * 8), 30px); line-height: 1; color: #b25a00 }
+  .bubble.ask span { font-size: clamp(9px, calc(var(--p) * 3.4), 12px); font-weight: 600 }
+  .bubble.sad { background: #ffe0dc }
+  .bubble.sad::after { background: #ffe0dc }
+  @keyframes pulse { 50% { transform: translate(-50%, calc(-100% - var(--p))) } }
+  .bubble.l.ask { animation-name: pulse-l }
+  .bubble.r.ask { animation-name: pulse-r }
+  @keyframes pulse-l { 50% { transform: translate(-18%, calc(-100% - var(--p))) } }
+  @keyframes pulse-r { 50% { transform: translate(-82%, calc(-100% - var(--p))) } }
+  @container (max-width: 480px) { .bubble.ask span { display: none } }
+  .night {
+    position: absolute; inset: 0; background: rgba(6, 9, 40, .72); opacity: 0; transition: opacity 1s; pointer-events: none;
+  }
+  .scene.off .night { opacity: 1 }
+  .note {
+    position: absolute; left: 50%; bottom: calc(var(--p) * 8); transform: translateX(-50%);
+    background: rgba(20, 22, 40, .82); color: #fff; border-radius: 99px; padding: 4px 14px;
+    font-size: clamp(11px, calc(var(--p) * 4.2), 15px); font-weight: 600; white-space: nowrap; transition: opacity .5s;
+  }
+  .scene.on .note.dark-only { opacity: 0 }
+  .scene.off .note.lit-only { opacity: 0 }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: 0.8rem; color: var(--muted-foreground) }
+  .legend .item { display: inline-flex; align-items: center; gap: 6px }
+  .legend canvas { width: 24px; height: 34px; image-rendering: pixelated }
+  .empty {
+    border: 1px dashed var(--border); border-radius: var(--radius); padding: 22px 18px; text-align: center; background: var(--card);
+  }
+  .empty h3 { margin: 0 0 6px; font-size: 1rem }
+  .empty p { margin: 0 auto; max-width: 46ch; font-size: 0.86rem; color: var(--muted-foreground); line-height: 1.55 }
+  .empty code { font-family: ui-monospace, Menlo, monospace; background: var(--muted); padding: 1px 6px; border-radius: 6px }
+</style>
+
+<header class="sh-bar">
+  <b>proto</b>
+  <label class="sh-control"><span class="sh-control-label">screen</span><select id="sh-screen"></select></label>
+  <span class="sh-spacer"></span>
+  <label class="sh-control"><span class="sh-control-label">state</span><select id="sh-state"></select></label>
+  <button id="sh-vp">vp: full (m)</button>
+  <div class="sh-theme" id="sh-theme" role="group" aria-label="theme (t)" hidden>
+    <button data-theme="light">light</button><button data-theme="dark">dark</button>
+  </div>
+</header>
+
+<main class="sh-stage">
+  <section data-screen="office" data-title="사무실" data-states="연결 직후,허용 대기,거절 후 퇴근,모두 완료,세션 없음">
+    <div class="app">
+      <div class="app-head">
+        <div>
+          <h1 class="app-title" data-component="Heading">Claude 사무실</h1>
+          <p class="app-sub">이 PC에서 연결한 Claude Code · 데스크톱 세션의 활동을 보여줍니다</p>
+        </div>
+        <div class="badges" id="badges" data-component="Badge" data-when="Default,연결 직후,허용 대기,거절 후 퇴근,모두 완료"></div>
+      </div>
+
+      <div class="tabs" id="tabs" role="tablist" data-component="Tabs" data-when="Default,연결 직후,허용 대기,거절 후 퇴근,모두 완료"></div>
+
+      <div class="scene off" id="scene" data-component="new:OfficeScene" role="img" aria-label="사무실 장면">
+        <canvas class="bg" id="bg" width="320" height="180"></canvas>
+        <div class="layer" id="signs">
+          <div class="sign room" style="left:calc(263*var(--p));top:calc(53*var(--p))">허용 대기 회의실</div>
+          <div class="sign exit" style="left:calc(64*var(--p));top:calc(166*var(--p))">퇴근</div>
+        </div>
+        <div class="layer" id="chars"></div>
+        <div class="night"></div>
+        <div class="layer" id="bubbles"></div>
+        <div class="note lit-only" id="note-lit"></div>
+        <div class="note dark-only" id="note-dark"></div>
+      </div>
+
+      <div class="legend" data-when="Default,연결 직후,허용 대기,거절 후 퇴근,모두 완료">
+        <span class="item"><canvas id="lg-tool" width="24" height="34"></canvas>tool</span>
+        <span class="item"><canvas id="lg-skill" width="24" height="34"></canvas>skill</span>
+        <span class="item"><canvas id="lg-sub" width="24" height="34"></canvas>sub-agent</span>
+        <span>· 돌아다님 = 수행 중 · <b>?</b> = 허용 대기 · 문밖으로 = 완료</span>
+      </div>
+
+      <div class="empty" data-when="세션 없음" data-component="Empty">
+        <h3>연결된 세션이 없어요</h3>
+        <p>Claude Code나 데스크톱 앱의 세션에서 이 화면의 스킬 <code>/office</code>를 실행하면 사무실에 불이 켜지고, 그 세션의 tool · skill · sub-agent가 캐릭터로 나타납니다.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+  const stage = document.querySelector('.sh-stage');
+  const screens = [...stage.querySelectorAll('[data-screen]')];
+  const screenSelect = document.getElementById('sh-screen');
+  const stateSelect = document.getElementById('sh-state');
+  const vpBtn = document.getElementById('sh-vp');
+  const themeCtl = document.getElementById('sh-theme');
+  const themeBtns = [...themeCtl.querySelectorAll('button')];
+  let current = null;
+  let currentStates = [];
+
+  screens.forEach(s => {
+    const option = document.createElement('option');
+    option.textContent = s.dataset.title || s.dataset.screen;
+    option.value = s.dataset.screen;
+    screenSelect.append(option);
+  });
+  screenSelect.onchange = () => show(screenSelect.value);
+
+  function show(slug) {
+    current = screens.find(s => s.dataset.screen === slug) || screens[0];
+    screens.forEach(s => s.hidden = s !== current);
+    screenSelect.value = current.dataset.screen;
+    history.replaceState(null, '', '#' + current.dataset.screen);
+    buildStates();
+  }
+
+  function buildStates() {
+    const declared = (current.dataset.states || '').split(',').map(x => x.trim()).filter(Boolean);
+    currentStates = ['Default', ...declared.filter(name => name !== 'Default')];
+    stateSelect.innerHTML = '';
+    currentStates.forEach(name => {
+      const option = document.createElement('option');
+      option.textContent = name;
+      option.value = name;
+      stateSelect.append(option);
+    });
+    applyState('Default');
+  }
+
+  function applyState(name) {
+    const active = currentStates.includes(name) ? name : 'Default';
+    current.querySelectorAll('[data-when]').forEach(el => {
+      el.hidden = !el.dataset.when.split(',').map(x => x.trim()).includes(active);
+    });
+    stateSelect.value = active;
+  }
+  stateSelect.onchange = () => applyState(stateSelect.value);
+
+  window.prototypeShell = {
+    showScreen: show,
+    setState: applyState,
+    getScreen: () => current?.dataset.screen,
+    getState: () => stateSelect.value
+  };
+
+  const VPS = ['full', '390', '768'];
+  let vp = VPS.find(v => document.body.classList.contains('sh-vp-' + v)) || 'full';
+  function applyVp() {
+    VPS.forEach(v => document.body.classList.toggle('sh-vp-' + v, v === vp && v !== 'full'));
+    vpBtn.textContent = 'vp: ' + vp + ' (m)';
+    vpBtn.classList.toggle('on', vp !== 'full');
+  }
+  vpBtn.onclick = () => { vp = VPS[(VPS.indexOf(vp) + 1) % VPS.length]; applyVp(); };
+  applyVp();
+
+  const hasDark = [...document.styleSheets].some(sheet => {
+    try {
+      return [...sheet.cssRules].some(rule => (rule.selectorText || '')
+        .split(',').some(part => /\.sh-theme-dark$/.test(part.trim())));
+    } catch { return false }
+  });
+  let dark = false;
+  function applyTheme() {
+    document.documentElement.classList.toggle('sh-theme-dark', dark);
+    document.body.classList.toggle('sh-theme-dark', dark);
+    themeBtns.forEach(b => b.classList.toggle('on', (b.dataset.theme === 'dark') === dark));
+  }
+  themeCtl.hidden = !hasDark;
+  themeBtns.forEach(b => b.onclick = () => { dark = b.dataset.theme === 'dark'; applyTheme(); });
+  applyTheme();
+
+  addEventListener('keydown', e => {
+    if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+    const i = screens.indexOf(current);
+    if (e.key === 'ArrowRight') show(screens[(i + 1) % screens.length].dataset.screen);
+    if (e.key === 'ArrowLeft') show(screens[(i - 1 + screens.length) % screens.length].dataset.screen);
+    if (e.key === 'm') vpBtn.click();
+    if (e.key === 't' && !themeCtl.hidden) { dark = !dark; applyTheme(); }
+  });
+
+  addEventListener('hashchange', () => show(location.hash.slice(1)));
+  show(location.hash.slice(1));
+</script>
+
+<script>
+  /* ───────── office activity view: dummy simulation (no network, no real data) ───────── */
+  const OL = '#2b1d14';
+  const KINDS = {
+    tool:  { label: 'tool',      tunic: '#2f9e5b', tunic2: '#1f7a43', hi: '#63d38e', hat: '#35b36a', hat2: '#1f7a43', c: '#35b36a' },
+    skill: { label: 'skill',     tunic: '#7a4bd1', tunic2: '#5a33a8', hi: '#a77df0', hat: '#8d5ae0', hat2: '#5a33a8', c: '#8d5ae0' },
+    sub:   { label: 'sub-agent', tunic: '#1f9fb0', tunic2: '#14727f', hi: '#5fd6e0', hat: '#26b5c7', hat2: '#14727f', c: '#26b5c7' }
+  };
+  const HAIR = ['#7a4a21', '#d9a441', '#2b2b3c', '#c0452f', '#e7e1d0', '#4a7a3a'];
+  const SKIN = ['#f6c7a1', '#e9ac80', '#c98a5e', '#f9d7b9'];
+
+  function px(c, x, y, col) { c.fillStyle = col; c.fillRect(x, y, 1, 1) }
+  function rows(list) { const out = []; list.forEach(([y, x0, x1]) => { for (let x = x0; x <= x1; x++) out.push([x, y]) }); return out }
+  function shape(c, pts, fill, outline) {
+    const set = new Set(pts.map(p => p.join(',')));
+    pts.forEach(([x, y]) => [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx, dy]) => {
+      if (!set.has((x + dx) + ',' + (y + dy))) px(c, x + dx, y + dy, outline);
+    }));
+    pts.forEach(([x, y]) => px(c, x, y, fill));
+  }
+  function ell(cx, cy, rx, ry) {
+    const out = [];
+    for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++)
+      for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++)
+        if (((x + .5 - cx) / rx) ** 2 + ((y + .5 - cy) / ry) ** 2 <= 1) out.push([x, y]);
+    return out;
+  }
+
+  /* 24 x 34 sprite: big head, small body (Link's Awakening-like proportions) */
+  function drawSprite(cv, o) {
+    const c = cv.getContext('2d'); c.clearRect(0, 0, 24, 34);
+    const K = KINDS[o.kind], lift = o.moving ? (o.frame % 2 ? 1 : 0) : 0, lift2 = o.moving ? (o.frame % 2 ? 0 : 1) : 0;
+    c.globalAlpha = .28; shape(c, ell(12, 32.5, 7, 1.4), '#000', 'rgba(0,0,0,0)'); c.globalAlpha = 1;
+    /* legs and boots */
+    shape(c, rows([[28, 8, 9], [29, 8, 9]]), o.skin, OL); shape(c, rows([[28, 14, 15], [29, 14, 15]]), o.skin, OL);
+    shape(c, rows([[30 - lift, 7, 10], [31 - lift, 7, 10], [32 - lift, 7, 10]]), '#7a4a21', OL);
+    shape(c, rows([[30 - lift2, 13, 16], [31 - lift2, 13, 16], [32 - lift2, 13, 16]]), '#7a4a21', OL);
+    /* body */
+    shape(c, rows([[22, 7, 16], [23, 7, 16], [24, 7, 16], [25, 7, 16], [26, 7, 16], [27, 7, 16]]), K.tunic, OL);
+    rows([[22, 8, 15]]).forEach(([x, y]) => px(c, x, y, K.hi));
+    rows([[23, 16, 16], [24, 16, 16], [25, 16, 16], [27, 7, 16]]).forEach(([x, y]) => px(c, x, y, K.tunic2));
+    rows([[26, 7, 16]]).forEach(([x, y]) => px(c, x, y, '#8a5a2b'));
+    px(c, 11, 26, '#ffd34d'); px(c, 12, 26, '#ffd34d');
+    /* arms */
+    const swing = o.moving ? (o.frame % 2 ? 1 : -1) : 0;
+    shape(c, rows([[23 + swing, 4, 5], [24 + swing, 4, 5], [25 + swing, 4, 5]]), K.tunic, OL);
+    shape(c, rows([[23 - swing, 18, 19], [24 - swing, 18, 19], [25 - swing, 18, 19]]), K.tunic, OL);
+    px(c, 4, 26 + swing, o.skin); px(c, 5, 26 + swing, o.skin); px(c, 18, 26 - swing, o.skin); px(c, 19, 26 - swing, o.skin);
+    /* head */
+    shape(c, ell(12, 13.2, 9.4, 9), o.skin, OL);
+    ell(12, 13.2, 9.4, 9).forEach(([x, y]) => { if (y < 11 || ((x < 5 || x > 18) && y < 17)) px(c, x, y, o.hair) });
+    rows([[11, 7, 8], [11, 15, 16], [10, 9, 14]]).forEach(([x, y]) => px(c, x, y, o.hair));
+    /* face */
+    const E = '#2b1d14', W = '#ffffff', ex = [[8, 14], [14, 14]];
+    if (o.expr === 'sad') {
+      ex.forEach(([x, y]) => { px(c, x, y + 1, E); px(c, x + 1, y + 1, E); px(c, x, y + 2, E) });
+      px(c, 7, 12, E); px(c, 8, 12, E); px(c, 15, 12, E); px(c, 16, 12, E);
+      px(c, 10, 19, E); px(c, 11, 18, E); px(c, 12, 18, E); px(c, 13, 18, E); px(c, 14, 19, E);
+      px(c, 19, 17, '#6ec6ff'); px(c, 19, 18, '#6ec6ff');
+    } else if (o.expr === 'confused') {
+      ex.forEach(([x, y]) => { px(c, x, y, E); px(c, x + 1, y, E); px(c, x, y + 1, E); px(c, x + 1, y + 1, E); px(c, x, y + 2, E); px(c, x + 1, y + 2, E) });
+      px(c, 8, 14, W); px(c, 15, 14, W);
+      px(c, 7, 12, E); px(c, 8, 12, E); px(c, 9, 11, E); px(c, 14, 10, E); px(c, 15, 10, E); px(c, 16, 11, E);
+      px(c, 11, 18, E); px(c, 12, 19, E); px(c, 13, 18, E);
+      px(c, 20, 9, '#6ec6ff'); px(c, 20, 10, '#6ec6ff'); px(c, 20, 11, '#9ad8ff');
+    } else {
+      ex.forEach(([x, y]) => { px(c, x, y, E); px(c, x + 1, y, E); px(c, x, y + 1, E); px(c, x + 1, y + 1, E); px(c, x, y + 2, E); px(c, x + 1, y + 2, E); px(c, x, y, W) });
+      px(c, 10, 18, E); px(c, 11, 19, E); px(c, 12, 19, E); px(c, 13, 19, E); px(c, 14, 18, E);
+    }
+    px(c, 6, 17, '#ff9aa2'); px(c, 7, 17, '#ff9aa2'); px(c, 17, 17, '#ff9aa2'); px(c, 18, 17, '#ff9aa2');
+    /* hats */
+    if (o.kind === 'tool') {
+      shape(c, rows([[2, 10, 13], [3, 9, 14], [4, 7, 17], [5, 5, 18], [6, 4, 19], [7, 4, 19], [8, 3, 20]]).concat(rows([[3, 15, 17], [4, 18, 20], [5, 20, 21]])), K.hat, OL);
+      shape(c, rows([[9, 3, 20]]), K.hat2, OL);
+      rows([[4, 8, 12], [5, 7, 10]]).forEach(([x, y]) => px(c, x, y, K.hi));
+    } else if (o.kind === 'skill') {
+      shape(c, rows([[0, 11, 13], [1, 10, 13], [2, 10, 14], [3, 9, 14], [4, 9, 15], [5, 8, 15], [6, 7, 16], [7, 6, 17], [8, 5, 18]]), K.hat, OL);
+      shape(c, rows([[9, 2, 21]]), K.hat2, OL);
+      [[12, 4], [11, 5], [12, 5], [13, 5], [12, 6]].forEach(([x, y]) => px(c, x, y, '#ffd34d'));
+    } else {
+      shape(c, rows([[3, 9, 14], [4, 7, 16], [5, 5, 18], [6, 4, 19], [7, 4, 19], [8, 3, 20]]), K.hat, OL);
+      rows([[6, 4, 19]]).forEach(([x, y]) => px(c, x, y, '#ffffff'));
+      shape(c, rows([[9, 2, 21]]), K.hat2, OL);
+      shape(c, rows([[12, 1, 2], [13, 1, 2], [14, 1, 2], [15, 1, 2], [16, 1, 2]]), '#566074', OL);
+      shape(c, rows([[12, 21, 22], [13, 21, 22], [14, 21, 22], [15, 21, 22], [16, 21, 22]]), '#566074', OL);
+      px(c, 3, 17, OL); px(c, 4, 18, OL); px(c, 5, 19, OL); px(c, 6, 19, OL); px(c, 7, 19, '#ff5a5a');
+    }
+  }
+
+  /* ── background: 320 x 180 pixel office ── */
+  const bgCv = document.getElementById('bg'), bg = bgCv.getContext('2d');
+  const R = (x, y, w, h, col) => { bg.fillStyle = col; bg.fillRect(x, y, w, h) };
+  function drawOffice() {
+    R(0, 0, 320, 180, '#c9a56b');
+    for (let y = 44; y < 170; y += 8) { R(0, y, 320, 1, '#b8935a'); for (let x = ((y / 8) % 2) * 20; x < 320; x += 40) R(x, y, 1, 8, '#b8935a'); }
+    R(0, 0, 320, 44, '#efe2c3'); for (let x = 0; x < 320; x += 16) R(x, 0, 1, 40, '#e3d4af');
+    R(0, 40, 320, 4, '#8a6a43'); R(0, 44, 320, 1, '#6b4f2f');
+    [[20, 8], [62, 8]].forEach(([x, y]) => { R(x - 1, y - 1, 32, 26, OL); R(x, y, 30, 24, '#8fd0ff'); R(x, y + 14, 30, 10, '#b7e3a0'); R(x + 14, y, 2, 24, '#fff'); R(x, y + 11, 30, 2, '#fff'); R(x + 3, y + 3, 5, 2, '#fff'); R(x + 20, y + 5, 6, 2, '#fff'); });
+    R(111, 7, 52, 28, OL); R(112, 8, 50, 26, '#fbfbf2'); R(116, 13, 22, 2, '#4a7ad6'); R(116, 19, 30, 2, '#d64a4a'); R(116, 25, 16, 2, '#3a9e5b'); R(148, 12, 10, 10, '#ffe27a'); R(113, 33, 48, 2, '#8a6a43');
+    R(180, 10, 22, 30, OL); R(181, 11, 20, 28, '#a0693a'); for (let y = 15; y < 38; y += 8) R(181, y, 20, 2, '#6b4426'); [[183, 12, '#d64a4a'], [189, 12, '#4a7ad6'], [195, 12, '#3a9e5b'], [185, 20, '#ffd34d'], [192, 20, '#a77df0'], [184, 28, '#4a7ad6'], [191, 28, '#d64a4a']].forEach(([x, y, c]) => R(x, y, 4, 6, c));
+    R(208, 14, 12, 12, OL); R(209, 15, 10, 10, '#fff'); R(213, 17, 1, 4, OL); R(213, 20, 4, 1, OL);
+    R(0, 168, 320, 12, '#6b4f2f'); R(0, 168, 320, 1, '#4a331c');
+    R(50, 160, 28, 20, OL); R(52, 162, 24, 18, '#e8c88f'); R(54, 166, 20, 14, '#f3dcb0'); R(60, 170, 8, 10, '#fff7dc'); R(46, 172, 36, 8, '#b33b3b'); R(48, 174, 32, 4, '#cf5959');
+    /* meeting room */
+    R(214, 50, 98, 100, '#9fb7c9'); for (let y = 66; y < 150; y += 6) for (let x = 214 + (y % 12 ? 0 : 6); x < 312; x += 12) R(x, y, 6, 6, '#94adc1');
+    R(214, 50, 98, 16, '#dbe8f2'); R(214, 64, 98, 3, '#5d7f99'); R(214, 50, 3, 100, '#5d7f99'); R(309, 50, 3, 100, '#5d7f99'); R(214, 50, 98, 2, '#5d7f99');
+    R(217, 52, 1, 98, 'rgba(255,255,255,.5)'); R(262, 53, 36, 10, OL); R(263, 54, 34, 8, '#2b3a55'); R(266, 56, 12, 2, '#6ec6ff'); R(266, 59, 20, 1, '#6ec6ff');
+    R(232, 84, 66, 28, OL); R(233, 85, 64, 26, '#a0693a'); R(233, 85, 64, 4, '#c58a54'); R(240, 76, 8, 8, '#4a7ad6'); R(255, 76, 8, 8, '#4a7ad6'); R(270, 76, 8, 8, '#4a7ad6'); R(285, 76, 8, 8, '#4a7ad6');
+    R(246, 92, 14, 8, '#fbfbf2'); R(266, 94, 10, 6, '#fbfbf2'); R(280, 91, 8, 8, '#d64a4a');
+    /* desks */
+    [[28, 64], [88, 64], [28, 112], [88, 112]].forEach(([x, y]) => {
+      R(x - 1, y - 1, 52, 18, OL); R(x, y, 50, 16, '#b87a43'); R(x, y, 50, 4, '#d9a26c'); R(x, y + 12, 50, 4, '#8a5a2b');
+      R(x + 17, y - 12, 16, 11, OL); R(x + 18, y - 11, 14, 8, '#2b3a55'); R(x + 19, y - 10, 12, 6, '#6ec6ff'); R(x + 22, y - 3, 6, 2, '#888'); R(x + 21, y - 1, 8, 1, '#666');
+      R(x + 4, y + 3, 9, 6, '#fbfbf2'); R(x + 38, y + 4, 6, 6, '#d64a4a'); R(x + 40, y + 2, 2, 2, '#3a9e5b');
+    });
+    R(196, 56, 16, 22, OL); R(197, 70, 14, 7, '#a0693a'); R(198, 57, 12, 14, '#3a9e5b'); R(201, 58, 6, 10, '#63d38e');
+    R(168, 96, 14, 22, OL); R(169, 97, 12, 20, '#dbe8f2'); R(171, 99, 8, 8, '#6ec6ff'); R(170, 108, 10, 8, '#9db0c0');
+    R(150, 130, 26, 18, OL); R(151, 131, 24, 16, '#c9ccd2'); R(153, 133, 20, 5, '#4b5563'); R(153, 141, 12, 3, '#fbfbf2'); R(168, 140, 4, 3, '#4ade80');
+    R(190, 142, 16, 14, OL); R(191, 143, 14, 12, '#a0693a'); R(193, 136, 12, 8, '#3a9e5b'); R(194, 137, 10, 6, '#63d38e');
+  }
+  drawOffice();
+
+  /* ── simulation ── */
+  const DOOR = { x: 64, y: 176 };
+  const WAYPOINTS = [[52, 94], [112, 94], [52, 142], [112, 142], [160, 112], [146, 150], [176, 128], [190, 84], [136, 64], [100, 118]];
+  const SLOTS = [[240, 128], [290, 128], [265, 148], [300, 148], [232, 148], [276, 120], [250, 120]];
+  const TEXT = {
+    tool: ['Read · PRODUCT.md', 'Edit · app/globals.css', 'Bash · bun run typecheck', "Grep · 'lucide-react'", 'Write · docs/decisions/…', 'WebFetch · code.claude.com', 'Read · components.json'],
+    skill: ['skill · shadcn', 'skill · define-product', 'skill · shape-idea', 'skill · project-knowledge'],
+    sub: ['서브에이전트 · Explore', '서브에이전트 · Plan', '서브에이전트 · claude-code-guide']
+  };
+  const ASK = ['Bash · git push', 'Edit · .claude/settings.json', 'Write · docs/specs/…', 'Bash · gh pr create'];
+  const $ = id => document.getElementById(id);
+  const sceneEl = $('scene'), charsEl = $('chars'), bubblesEl = $('bubbles');
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+
+  const SESSIONS = [
+    { id: 's1', name: 'side-project', live: true },
+    { id: 's2', name: 'blog-writer', scenario: { work: 2, ask: 1 } },
+    { id: 's3', name: 'api-server', scenario: { work: 0, ask: 0, dark: true } }
+  ];
+  let sel = 's1', sessions = true;
+  const sim = { chars: [], live: true, lit: false, done: 0, nextSpawn: 0, nextAsk: 12, idSeq: 0, timers: [], connectedNote: false };
+
+  function mkChar(kind, x, y, opts = {}) {
+    const id = ++sim.idSeq;
+    const el = document.createElement('div'); el.className = 'char'; const cv = document.createElement('canvas'); cv.width = 24; cv.height = 34; el.append(cv);
+    const bub = document.createElement('div'); bub.className = 'bubble';
+    charsEl.append(el); bubblesEl.append(bub);
+    const ch = { id, kind, x, y, el, cv, bub, hair: pick(HAIR), skin: pick(SKIN), expr: 'happy', frame: 0, ft: 0, moving: false,
+      mode: 'walk', goal: null, pending: 'work', pause: 0, age: 0, life: rand(9, 20), text: pick(TEXT[kind]), flip: 1, askText: pick(ASK), waitT: 0, fate: 'ok' };
+    sim.chars.push(ch); setBubble(ch); drawCh(ch); place(ch);
+    return ch;
+  }
+  function drawCh(ch) { drawSprite(ch.cv, { kind: ch.kind, hair: ch.hair, skin: ch.skin, expr: ch.expr, frame: ch.frame, moving: ch.moving }) }
+  function setBubble(ch) {
+    const b = ch.bub;
+    b.className = 'bubble' + (ch.mode === 'wait' ? ' ask' : '') + (ch.expr === 'sad' ? ' sad' : '');
+    b.style.setProperty('--k', KINDS[ch.kind].c);
+    if (ch.mode === 'wait') b.innerHTML = '<b>?</b><span>' + ch.askText + '</span>';
+    else if (ch.expr === 'sad') b.innerHTML = '거절됨 · 퇴근할게요';
+    else b.innerHTML = '<i></i>' + ch.text;
+  }
+  function place(ch) {
+    ch.el.style.setProperty('--x', ch.x.toFixed(2)); ch.el.style.setProperty('--y', ch.y.toFixed(2)); ch.el.style.zIndex = Math.round(ch.y);
+    ch.cv.style.transform = 'scaleX(' + ch.flip + ')';
+    ch.bub.style.setProperty('--x', ch.x.toFixed(2)); ch.bub.style.setProperty('--y', ch.y.toFixed(2));
+    ch.bub.classList.toggle('l', ch.x < 70); ch.bub.classList.toggle('r', ch.x > 262);
+    ch.el.classList.toggle('bob', !ch.moving);
+  }
+  function goTo(ch, g, pending) { ch.goal = { x: g[0], y: g[1] }; ch.pending = pending; ch.mode = 'walk'; ch.moving = true }
+  function removeCh(ch) { ch.el.remove(); ch.bub.remove(); sim.chars = sim.chars.filter(c => c !== ch) }
+  function spawnWork(kind, atDoor = true) {
+    const w = pick(WAYPOINTS);
+    const ch = mkChar(kind, atDoor ? DOOR.x : w[0], atDoor ? DOOR.y : w[1]);
+    if (atDoor) goTo(ch, w, 'work'); else { ch.mode = 'pause'; ch.pause = rand(.5, 2.5); ch.moving = false; ch.age = rand(0, 6) }
+    return ch;
+  }
+  function sendAsk(ch) {
+    const used = sim.chars.filter(c => c.mode === 'wait' || c.pending === 'wait').length;
+    ch.askText = pick(ASK); ch.fate = 'ok';
+    goTo(ch, SLOTS[used % SLOTS.length], 'wait'); setBubble(ch);
+  }
+  function leave(ch, sad) {
+    if (sad) { ch.expr = 'sad'; ch.moving = false; setBubble(ch); drawCh(ch); ch.mode = 'pause'; ch.pending = 'exit'; ch.pause = 1.1; }
+    else { ch.expr = 'happy'; goTo(ch, [DOOR.x, DOOR.y + 4], 'exit'); setBubble(ch); }
+  }
+  function working() { return sim.chars.filter(c => c.pending === 'work' && c.mode !== 'wait').length }
+  function waiting() { return sim.chars.filter(c => c.mode === 'wait' || c.pending === 'wait').length }
+
+  function step(dt) {
+    sim.chars.slice().forEach(ch => {
+      ch.age += dt;
+      if (ch.mode === 'walk') {
+        const dx = ch.goal.x - ch.x, dy = ch.goal.y - ch.y, d = Math.hypot(dx, dy), sp = 34 * dt;
+        if (d <= sp) {
+          ch.x = ch.goal.x; ch.y = ch.goal.y; ch.moving = false;
+          if (ch.pending === 'wait') { ch.mode = 'wait'; ch.expr = 'confused'; ch.waitT = 0; ch.flip = 1; setBubble(ch); drawCh(ch); }
+          else if (ch.pending === 'exit') { sim.done++; ch.el.classList.add('gone'); ch.bub.style.opacity = 0; setTimeout(() => removeCh(ch), 380); ch.mode = 'gone'; }
+          else { ch.mode = 'pause'; ch.pause = rand(1.4, 3.4); drawCh(ch); }
+        } else {
+          ch.x += dx / d * sp; ch.y += dy / d * sp; if (Math.abs(dx) > 1) ch.flip = dx < 0 ? -1 : 1;
+          ch.ft += dt; if (ch.ft > .17) { ch.ft = 0; ch.frame++; drawCh(ch) }
+        }
+      } else if (ch.mode === 'pause') {
+        ch.pause -= dt;
+        if (ch.pause <= 0) {
+          if (ch.pending === 'exit') { goTo(ch, [DOOR.x, DOOR.y + 4], 'exit'); }
+          else if (sim.live && ch.age > ch.life) leave(ch, false);
+          else goTo(ch, pick(WAYPOINTS), 'work');
+        }
+      } else if (ch.mode === 'wait' && sim.live) {
+        ch.waitT += dt;
+        if (ch.waitT > 7) {
+          if (ch.fate === 'ok' && Math.random() < .35) { ch.fate = 'deny'; ch.expr = 'sad'; ch.mode = 'pause'; ch.pending = 'exit'; ch.pause = 1.3; ch.moving = false; setBubble(ch); drawCh(ch); }
+          else { ch.expr = 'happy'; ch.text = pick(TEXT[ch.kind]); goTo(ch, pick(WAYPOINTS), 'work'); setBubble(ch); drawCh(ch); }
+        }
+      }
+      if (ch.mode !== 'gone') place(ch);
+    });
+    if (sim.live) {
+      sim.nextSpawn -= dt; sim.nextAsk -= dt;
+      if (sim.nextSpawn <= 0 && sim.chars.filter(c => c.pending !== 'exit').length < 6) { spawnWork(pick(['tool', 'tool', 'skill', 'sub'])); sim.nextSpawn = rand(3, 6); sim.lit = true; }
+      if (sim.nextAsk <= 0) { const w = sim.chars.filter(c => c.mode === 'pause' && c.pending === 'work'); if (w.length && waiting() < 2) sendAsk(pick(w)); sim.nextAsk = rand(14, 22); }
+    }
+    if (sim.chars.length > 0) sim.lit = true;
+    else if (sim.done > 0 && sim.lit && !sim.keepLit) sim.lit = false;
+    render();
+  }
+
+  function render() {
+    sceneEl.classList.toggle('off', !sim.lit); sceneEl.classList.toggle('on', sim.lit);
+    $('note-lit').textContent = sim.connectedNote ? '스킬 연결됨 · 사무실에 불이 켜졌어요' : '첫 업무를 기다리는 중이에요';
+    $('note-lit').style.opacity = sim.lit && sim.chars.length === 0 ? 1 : 0;
+    $('note-dark').textContent = sessions ? '모두 퇴근했어요 · 불이 꺼졌어요' : '연결된 세션이 없어요';
+    const w = working(), a = waiting();
+    $('badges').innerHTML = (w ? '<span class="badge primary">일하는 중 ' + w + '</span>' : '') + (a ? '<span class="badge ask">? 허용 대기 ' + a + '</span>' : '') + '<span class="badge">오늘 완료 ' + sim.done + '</span>';
+    const tabs = SESSIONS.map(s => {
+      let dot = 'off', sub = '퇴근', on = sel === s.id;
+      if (on) { dot = a ? 'ask' : (sim.lit ? 'work' : 'off'); sub = a ? '허용 대기 ' + a : (sim.lit ? (w ? '진행 중 ' + w : '대기') : '퇴근'); }
+      else if (s.scenario) { if (s.scenario.ask) { dot = 'ask'; sub = '허용 대기 ' + s.scenario.ask } else if (s.scenario.work) { dot = 'work'; sub = '진행 중 ' + s.scenario.work } }
+      else { dot = 'work'; sub = '진행 중' }
+      return '<button class="tab" role="tab" data-sid="' + s.id + '" aria-selected="' + on + '"><span class="dot ' + dot + '"></span>' + s.name + ' <small>' + sub + '</small></button>';
+    }).join('');
+    if ($('tabs').dataset.sig !== tabs) { $('tabs').innerHTML = tabs; $('tabs').dataset.sig = tabs }
+  }
+
+  function clearScene() { sim.timers.forEach(clearTimeout); sim.timers = []; sim.chars.slice().forEach(removeCh); sim.keepLit = false; sim.connectedNote = false }
+  function later(fn, ms) { sim.timers.push(setTimeout(fn, ms)) }
+
+  function loadPreset(name) {
+    clearScene(); sessions = true; sel = 's1'; sim.done = name === 'Default' ? 6 : 0;
+    const sc = n => spawnWork(pick(['tool', 'skill', 'sub', 'tool']), false);
+    if (name === 'Default') {
+      sim.live = true; sim.lit = true; sim.nextSpawn = 2.5; sim.nextAsk = 11;
+      ['tool', 'skill', 'tool', 'sub'].forEach(k => spawnWork(k, false));
+    } else if (name === '연결 직후') {
+      sim.live = false; sim.lit = false; sim.done = 0; sim.keepLit = true; sim.connectedNote = true;
+      later(() => { sim.lit = true; render() }, 700);
+      later(() => { sim.connectedNote = false; render() }, 4200);
+    } else if (name === '허용 대기') {
+      sim.live = false; sim.lit = true; sim.done = 4;
+      for (let i = 0; i < 3; i++) sc();
+      ['tool', 'sub'].forEach(k => { const c = spawnWork(k, false); c.x = SLOTS[sim.chars.length % 4][0]; c.y = SLOTS[sim.chars.length % 4][1]; });
+      sim.chars.filter(c => c.age >= 0).slice(-2).forEach((c, i) => { c.mode = 'wait'; c.pending = 'wait'; c.expr = 'confused'; c.moving = false; c.x = SLOTS[i][0]; c.y = SLOTS[i][1]; c.askText = i ? 'Edit · .claude/settings.json' : 'Bash · git push'; setBubble(c); drawCh(c); place(c) });
+    } else if (name === '거절 후 퇴근') {
+      sim.live = false; sim.lit = true; sim.done = 3; sc(); sc();
+      const c = spawnWork('tool', false); c.mode = 'wait'; c.pending = 'wait'; c.expr = 'confused'; c.moving = false; c.x = SLOTS[0][0]; c.y = SLOTS[0][1]; c.askText = 'Bash · git push'; setBubble(c); drawCh(c); place(c);
+      later(() => { if (sim.chars.includes(c)) { c.mode = 'pause'; c.pending = 'exit'; c.expr = 'sad'; c.moving = false; c.pause = 1.6; setBubble(c); drawCh(c) } }, 2600);
+    } else if (name === '모두 완료') {
+      sim.live = false; sim.lit = true; sim.done = 5;
+      ['tool', 'skill', 'sub'].forEach(k => spawnWork(k, false));
+      sim.chars.forEach((c, i) => later(() => leave(c, false), 800 + i * 900));
+    } else if (name === '세션 없음') {
+      sim.live = false; sim.lit = false; sessions = false; sim.done = 0;
+    }
+    render();
+  }
+  function loadSession(id) {
+    const s = SESSIONS.find(x => x.id === id); if (!s) return;
+    if (s.live) { stateSelect.value = 'Default'; loadPreset('Default'); return; }
+    clearScene(); sel = id; sim.live = false; sim.done = 2; sim.lit = !s.scenario.dark;
+    for (let i = 0; i < s.scenario.work; i++) spawnWork(pick(['tool', 'skill']), false);
+    for (let i = 0; i < s.scenario.ask; i++) { const c = spawnWork('tool', false); c.mode = 'wait'; c.pending = 'wait'; c.expr = 'confused'; c.moving = false; c.x = SLOTS[i][0]; c.y = SLOTS[i][1]; c.askText = 'Write · docs/specs/…'; setBubble(c); drawCh(c); place(c) }
+    if (s.scenario.dark) sim.done = 4;
+    render();
+  }
+  $('tabs').addEventListener('click', e => { const b = e.target.closest('[data-sid]'); if (b) loadSession(b.dataset.sid) });
+
+  /* the shell's state selector calls its own applyState; listen for the change as well */
+  const origSet = window.prototypeShell.setState;
+  window.prototypeShell.setState = n => { origSet(n); loadPreset(n) };
+  stateSelect.addEventListener('change', () => loadPreset(stateSelect.value));
+
+  [['lg-tool', 'tool'], ['lg-skill', 'skill'], ['lg-sub', 'sub']].forEach(([id, k]) => drawSprite($(id), { kind: k, hair: HAIR[k === 'tool' ? 0 : k === 'skill' ? 2 : 1], skin: SKIN[0], expr: 'happy', frame: 0, moving: false }));
+
+  loadPreset('Default');
+  let last = performance.now();
+  (function loop(t) { const dt = Math.min(.1, (t - last) / 1000); last = t; step(dt); requestAnimationFrame(loop) })(last);
+</script>
