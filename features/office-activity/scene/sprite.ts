@@ -129,6 +129,10 @@ function drawFace(c: Ctx, expr: Expression) {
     return;
   }
   px(c, 8, 14, "#fff"); px(c, 14, 14, "#fff");
+  if (expr === "plain") {
+    px(c, 10, 19, eye); px(c, 11, 19, eye); px(c, 12, 19, eye); px(c, 13, 19, eye);
+    return;
+  }
   px(c, 10, 18, eye); px(c, 11, 19, eye); px(c, 12, 19, eye); px(c, 13, 19, eye); px(c, 14, 18, eye);
 }
 

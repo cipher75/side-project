@@ -1,5 +1,7 @@
 import { recordRawEvent } from "./raw-event-log";
 import { applyHookEvent, emptyOfficeState, pruneOfficeState } from "./session-state";
+import { finishedTaskToolUseIds } from "./task-notification";
+import { emptyReaderState, followTranscript, readCallOutcomes, stopFollowing } from "./transcript-watch";
 import type { OfficeState } from "./types";
 
 // 서버 전용 진입점: hook 이벤트를 받아 사무실 상태를 만들고, 화면에 알린다.
@@ -11,7 +13,8 @@ type OfficeStoreGlobal = typeof globalThis & {
 
 function store() {
   const g = globalThis as OfficeStoreGlobal;
-  g.__officeStore ??= { state: emptyOfficeState(), listeners: new Set() };
+  // instance는 서버가 켜질 때마다 새로 정한다. 화면은 이 값이 바뀌면 서버가 다시 켜진 것을 안다.
+  g.__officeStore ??= { state: { ...emptyOfficeState(), instance: crypto.randomUUID() }, listeners: new Set() };
   return g.__officeStore;
 }
 
@@ -20,6 +23,71 @@ export function ingestHookEvent(payload: Record<string, unknown>, now = Date.now
   const s = store();
   s.state = applyHookEvent(s.state, payload, now);
   notify();
+  rememberHooked(payload);
+  followTranscripts(payload);
+}
+
+// transcript 형식이 바뀌었는지 스스로 확인하기 위해, Post hook을 받은 호출을 기억해 둔다.
+// transcript가 이 호출을 "실행되지 않음"이라고 읽으면 판단기가 형식을 잘못 읽고 있다는 뜻이다.
+const HOOKED_MAX = 2_000;
+type HookedGlobal = typeof globalThis & { __officeHooked?: Map<string, Set<string>> };
+
+function hookedIds(sessionId: string): Set<string> {
+  const g = globalThis as HookedGlobal;
+  g.__officeHooked ??= new Map();
+  let ids = g.__officeHooked.get(sessionId);
+  if (!ids) g.__officeHooked.set(sessionId, (ids = new Set()));
+  return ids;
+}
+
+function rememberHooked(payload: Record<string, unknown>) {
+  const { session_id: sessionId, tool_use_id: toolUseId, hook_event_name: name } = payload;
+  if (typeof sessionId !== "string" || !sessionId) return;
+  if (name === "SessionEnd") {
+    (globalThis as HookedGlobal).__officeHooked?.delete(sessionId);
+    return;
+  }
+  if ((name !== "PostToolUse" && name !== "PostToolUseFailure") || typeof toolUseId !== "string") return;
+  const ids = hookedIds(sessionId);
+  ids.add(toolUseId);
+  if (ids.size > HOOKED_MAX) ids.delete(ids.values().next().value as string);
+}
+
+// 허용 거절과 백그라운드 작업 완료는 transcript에만 남으므로, hook이 알려 준 transcript를 지켜보다가 이벤트로 바꿔 넣는다.
+function followTranscripts(payload: Record<string, unknown>) {
+  const sessionId = payload.session_id;
+  if (typeof sessionId !== "string" || !sessionId) return;
+  if (payload.hook_event_name === "SessionEnd") {
+    stopFollowing(sessionId);
+    return;
+  }
+
+  const transcript = payload.transcript_path;
+  if (typeof transcript !== "string" || !transcript) return;
+  // followTranscript는 같은 파일에 대해 처음 넘긴 콜백만 쓰므로, 아직 판단하지 못한 결과도 그 콜백이 들고 있는다.
+  let reader = emptyReaderState();
+  followTranscript(sessionId, transcript, (lines) => {
+    const read = readCallOutcomes(reader, lines);
+    reader = read.state;
+    const hooked = hookedIds(sessionId);
+    for (const outcome of read.outcomes) {
+      const contradicts = !outcome.executed && hooked.has(outcome.toolUseId);
+      hooked.delete(outcome.toolUseId);
+      ingestHookEvent({
+        hook_event_name: contradicts ? "TranscriptUnreliable" : outcome.executed ? "TranscriptExecuted" : "TranscriptNotExecuted",
+        session_id: sessionId,
+        tool_use_id: outcome.toolUseId,
+        tool_name: outcome.toolName,
+        tool_input: outcome.toolInput,
+        tool_response: { isAsync: outcome.async },
+        rejected: outcome.rejected,
+      });
+    }
+    // 백그라운드 sub-agent는 끝났다는 hook 이벤트가 없으므로, 끝났다는 알림을 같은 transcript에서 찾는다.
+    for (const toolUseId of finishedTaskToolUseIds(lines)) {
+      ingestHookEvent({ hook_event_name: "TranscriptTaskFinished", session_id: sessionId, tool_use_id: toolUseId });
+    }
+  });
 }
 
 export function officeSnapshot(now = Date.now()): OfficeState {

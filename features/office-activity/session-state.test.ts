@@ -174,10 +174,36 @@ describe("백그라운드로 시작한 sub-agent", () => {
     expect(session(state).doneCount).toBe(0);
   });
 
-  test("턴이 끝나면 그 sub-agent 캐릭터도 나간다", () => {
+  test("턴이 끝나도 백그라운드 sub-agent 캐릭터는 계속 일한다", () => {
     const state = apply(emptyOfficeState(), connect, launch, launched, { hook_event_name: "Stop", session_id: S });
 
+    expect(session(state).characters).toEqual([expect.objectContaining({ id: "a1", status: "working" })]);
+  });
+
+  test("sub-agent가 끝났다는 신호가 오면 그 캐릭터가 나간다", () => {
+    const state = apply(emptyOfficeState(), connect, launch, launched, {
+      hook_event_name: "TranscriptTaskFinished",
+      session_id: S,
+      tool_use_id: "a1",
+    });
+
     expect(session(state)).toMatchObject({ characters: [], doneCount: 1 });
+  });
+
+  test("다른 호출의 끝 신호는 이 sub-agent 캐릭터에 영향을 주지 않는다", () => {
+    const state = apply(emptyOfficeState(), connect, launch, launched, {
+      hook_event_name: "TranscriptTaskFinished",
+      session_id: S,
+      tool_use_id: "other",
+    });
+
+    expect(session(state).characters).toHaveLength(1);
+  });
+
+  test("세션이 끝나면 남은 sub-agent 캐릭터도 나간다", () => {
+    const state = apply(emptyOfficeState(), connect, launch, launched, { hook_event_name: "SessionEnd", session_id: S });
+
+    expect(session(state).characters).toEqual([]);
   });
 
   test("바로 끝나는 일반 Agent 호출은 응답이 오면 나간다", () => {
@@ -231,126 +257,275 @@ describe("MCP tool 이름", () => {
   });
 });
 
-describe("허용 대기와 거절", () => {
+// 허용과 거절은 추정하지 않는다. 허용은 회의실에 있던 호출이 실행되었다는 신호(Post hook이나
+// transcript의 Post hook 기록)로, 거절은 transcript가 실행되지 않았다고 알려 준 호출(TranscriptNotExecuted)이나
+// PermissionDenied hook으로 정한다.
+describe("허용과 거절", () => {
   const bash = { command: "git push" };
-  const start = [
+  const waiting = (...more: Record<string, unknown>[]) =>
+    apply(
+      emptyOfficeState(),
+      connect,
+      { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "t1", tool_name: "Read", tool_input: { file_path: "a.md" } },
+      { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "t2", tool_name: "Bash", tool_input: bash },
+      { hook_event_name: "PermissionRequest", session_id: S, tool_name: "Bash", tool_input: bash },
+      ...more
+    );
+  const statusOf = (state: OfficeState) => session(state).characters.map((c) => [c.id, c.status]);
+  const post = (id: string) => ({ hook_event_name: "PostToolUse", session_id: S, tool_use_id: id });
+  const result = (id: string) => ({ hook_event_name: "TranscriptNotExecuted", session_id: S, tool_use_id: id });
+  const rejected = (id: string) => ({ ...result(id), rejected: true });
+
+  test("허용 요청이 오면 입력이 같은 호출의 캐릭터만 허용 대기가 된다", () => {
+    expect(statusOf(waiting())).toEqual([["t1", "working"], ["t2", "waiting"]]);
+  });
+
+  test("허용 대기였던 호출의 Post hook이 오면 허용된 것이므로 approved가 된다", () => {
+    const state = waiting(post("t2"));
+
+    expect(statusOf(state)).toEqual([["t1", "working"], ["t2", "approved"]]);
+    expect(session(state).doneCount).toBe(1);
+  });
+
+  test("허용 대기였던 호출이 실패로 끝나도 실행은 된 것이므로 approved가 된다", () => {
+    const state = waiting({ hook_event_name: "PostToolUseFailure", session_id: S, tool_use_id: "t2", error: "exit 1" });
+
+    expect(statusOf(state)).toEqual([["t1", "working"], ["t2", "approved"]]);
+  });
+
+  test("서버가 Post hook을 놓쳐도 transcript에 실행 기록이 있으면 approved가 된다", () => {
+    const state = waiting({ hook_event_name: "TranscriptExecuted", session_id: S, tool_use_id: "t2", tool_response: { isAsync: false } });
+
+    expect(statusOf(state)).toEqual([["t1", "working"], ["t2", "approved"]]);
+  });
+
+  test("Post hook과 transcript 실행 기록이 둘 다 와도 한 번만 센다", () => {
+    const executed = { hook_event_name: "TranscriptExecuted", session_id: S, tool_use_id: "t2", tool_response: { isAsync: false } };
+    const state = waiting(post("t2"), executed);
+
+    expect(statusOf(state)).toEqual([["t1", "working"], ["t2", "approved"]]);
+    expect(session(state).doneCount).toBe(1);
+  });
+
+  // Claude Code는 호출을 시작하며 PreToolUse를 보낸 직후 그 호출의 허용을 묻는다.
+  const twins = [
     connect,
-    { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "t1", tool_name: "Read", tool_input: { file_path: "a.md" } },
-    { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "t2", tool_name: "Bash", tool_input: bash },
+    { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "p1", tool_name: "Bash", tool_input: bash },
+    { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "p2", tool_name: "Bash", tool_input: bash },
+    { hook_event_name: "PermissionRequest", session_id: S, tool_name: "Bash", tool_input: bash },
   ];
 
-  test("허용 요청이 오면 같은 호출의 캐릭터만 허용 대기가 된다", () => {
-    const state = apply(emptyOfficeState(), ...start, {
-      hook_event_name: "PermissionRequest",
-      session_id: S,
-      tool_name: "Bash",
-      tool_input: bash,
-    });
-
-    expect(session(state).characters.map((c) => [c.id, c.status])).toEqual([
-      ["t1", "working"],
-      ["t2", "waiting"],
-    ]);
+  test("입력이 같은 호출이 여럿이면 가장 최근에 시작한 호출이 허용 대기가 된다", () => {
+    expect(statusOf(apply(emptyOfficeState(), ...twins))).toEqual([["p1", "working"], ["p2", "waiting"]]);
   });
 
-  test("허용된 호출이 끝나면 허용 대기 캐릭터도 나간다", () => {
+  test("짝이 틀려 회의실 밖에 있던 같은 입력의 호출이 실행되면, 그 호출을 허용된 것으로 바로잡는다", () => {
+    const state = apply(emptyOfficeState(), ...twins, post("p1"));
+
+    expect(statusOf(state)).toEqual([["p1", "approved"], ["p2", "working"]]);
+    expect(session(state).characters.find((c) => c.id === "p2")?.waitingAt).toBeUndefined();
+  });
+
+  test("입력이 다른 호출이 실행된 것은 회의실의 호출과 상관없다", () => {
+    const state = waiting(post("t1"));
+
+    expect(statusOf(state)).toEqual([["t2", "waiting"]]);
+  });
+
+  test("입력 표현이 달라 같은 입력을 못 찾아도 같은 도구의 가장 최근 호출이 허용 대기가 된다", () => {
     const state = apply(
       emptyOfficeState(),
-      ...start,
-      { hook_event_name: "PermissionRequest", session_id: S, tool_name: "Bash", tool_input: bash },
-      { hook_event_name: "PostToolUse", session_id: S, tool_use_id: "t2", tool_name: "Bash" }
+      connect,
+      { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "b1", tool_name: "Bash", tool_input: { command: "ls" } },
+      { hook_event_name: "PermissionRequest", session_id: S, tool_name: "Bash", tool_input: { command: "ls", extra: 1 } }
     );
 
-    expect(session(state).characters.map((c) => c.id)).toEqual(["t1"]);
+    expect(statusOf(state)).toEqual([["b1", "waiting"]]);
   });
 
-  test("거절되면 그 캐릭터는 거절됨 상태가 되고 거절 수가 기록된다", () => {
+  test("실행되지 않은 결과에 거절의 증거가 있으면 그 캐릭터만 denied가 된다", () => {
+    const state = waiting(rejected("t2"));
+
+    expect(statusOf(state)).toEqual([["t1", "working"], ["t2", "denied"]]);
+    expect(session(state).doneCount).toBe(1);
+  });
+
+  test("이미 Post hook으로 끝난 호출은 나중 신호가 아무것도 바꾸지 않는다", () => {
+    const state = waiting(post("t2"), result("t2"), post("t1"), result("t1"));
+
+    expect(statusOf(state)).toEqual([["t2", "approved"]]);
+    expect(session(state).doneCount).toBe(2);
+  });
+
+  test("거절의 증거 없이 실행되지 않은 호출(만료, 새 메시지로 닫힘, 중단 등)은 cancelled가 된다", () => {
+    const state = waiting(result("t2"));
+
+    expect(statusOf(state)).toEqual([["t1", "working"], ["t2", "cancelled"]]);
+    expect(session(state).doneCount).toBe(1);
+  });
+
+  test("허용 창 없이 권한 규칙으로 막힌 호출은 사용자의 거절이 아니므로 cancelled가 된다", () => {
+    const state = waiting(result("t1"));
+
+    expect(statusOf(state)).toEqual([["t1", "cancelled"], ["t2", "waiting"]]);
+  });
+
+  test("transcript를 믿을 수 없게 된 세션은 실행되지 않았다는 판단을 쓰지 않는다", () => {
+    const state = waiting({ hook_event_name: "TranscriptUnreliable", session_id: S, tool_use_id: "x" }, rejected("t2"));
+
+    expect(statusOf(state)).toEqual([["t1", "working"], ["t2", "waiting"]]);
+    expect(session(state).transcriptUnreliable).toBe(true);
+  });
+
+  test("auto 모드 분류기의 거절 hook은 tool_use_id가 같은 캐릭터만 denied로 바꾼다", () => {
+    const state = waiting(
+      { hook_event_name: "PermissionDenied", session_id: S, tool_use_id: "other", tool_name: "Bash" },
+      { hook_event_name: "PermissionDenied", session_id: S, tool_use_id: "t2", tool_name: "Bash" }
+    );
+
+    expect(statusOf(state)).toEqual([["t1", "working"], ["t2", "denied"]]);
+  });
+
+  test("새 프롬프트가 오거나 오래 기다려도 거절로 보지 않는다", () => {
+    let state = waiting({ hook_event_name: "UserPromptSubmit", session_id: S, prompt: "다른 걸 해줘" });
+    state = applyHookEvent(
+      state,
+      { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "t3", tool_name: "Read", tool_input: {} },
+      600_000
+    );
+
+    expect(statusOf(state)).toEqual([["t1", "working"], ["t2", "waiting"], ["t3", "working"]]);
+  });
+
+  test("백그라운드로 도는 sub-agent는 시작 결과가 기록되어도 거절로 보지 않는다", () => {
     const state = apply(
       emptyOfficeState(),
-      ...start,
-      { hook_event_name: "PermissionRequest", session_id: S, tool_name: "Bash", tool_input: bash },
-      { hook_event_name: "PermissionDenied", session_id: S, tool_use_id: "t2", tool_name: "Bash", tool_input: bash, reason: "no" }
+      connect,
+      { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "a1", tool_name: "Agent", tool_input: {} },
+      { hook_event_name: "PostToolUse", session_id: S, tool_use_id: "a1", tool_response: { isAsync: true } },
+      result("a1")
     );
 
-    expect(session(state).characters.map((c) => [c.id, c.status])).toEqual([
-      ["t1", "working"],
-      ["t2", "denied"],
-    ]);
+    expect(statusOf(state)).toEqual([["a1", "working"]]);
   });
 
-  test("거절된 캐릭터는 시간이 지난 뒤 다음 이벤트에서 정리된다", () => {
-    let state = apply(
+  test("서버가 Post hook을 놓친 백그라운드 sub-agent도 transcript의 실행 기록으로 계속 일한다", () => {
+    const state = apply(
       emptyOfficeState(),
-      ...start,
-      { hook_event_name: "PermissionRequest", session_id: S, tool_name: "Bash", tool_input: bash },
-      { hook_event_name: "PermissionDenied", session_id: S, tool_use_id: "t2", tool_name: "Bash", tool_input: bash }
+      connect,
+      { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "a1", tool_name: "Agent", tool_input: {} },
+      { hook_event_name: "TranscriptExecuted", session_id: S, tool_use_id: "a1", tool_response: { isAsync: true } },
+      { hook_event_name: "Stop", session_id: S }
     );
-    state = applyHookEvent(state, { hook_event_name: "PostToolUse", session_id: S, tool_use_id: "t1", tool_name: "Read" }, 60_000);
+
+    expect(session(state).characters).toEqual([expect.objectContaining({ id: "a1", status: "working", background: true })]);
+  });
+
+  test("transcript를 읽지 못해도 턴이 끝나면 허용 대기는 거절의 증거가 없으므로 cancelled가 되고, 일하던 호출은 끝난다", () => {
+    const state = waiting({ hook_event_name: "Stop", session_id: S });
+
+    expect(statusOf(state)).toEqual([["t2", "cancelled"]]);
+    expect(session(state).doneCount).toBe(2);
+  });
+
+  test("허용되거나 거절된 캐릭터는 불을 켜 두지 않고, 퇴근 장면 시간이 지나면 정리된다", () => {
+    let state = waiting(post("t1"), result("t2"));
+    expect(session(state)).toMatchObject({ lit: false, doneCount: 2 });
+
+    state = applyHookEvent(state, { hook_event_name: "Notification", session_id: S }, 60_000);
+    expect(session(state).characters).toEqual([]);
+  });
+
+  test("세션이 끝나면 허용 대기는 허용 여부를 모르므로 approved가 아니라 그냥 나간다", () => {
+    const state = waiting({ hook_event_name: "SessionEnd", session_id: S });
 
     expect(session(state).characters).toEqual([]);
+    expect(session(state).doneCount).toBe(2);
   });
 });
 
-// Claude Code는 거절을 알려 주지 않으므로, 끝나지 않은 허용 대기 호출은 다음 이벤트에서 거절로 추정한다.
-describe("허용 거절 추정", () => {
-  const command = { command: "git push" };
-  const waitingState = () => {
-    let state = applyHookEvent(emptyOfficeState(), connect, 1_000);
-    state = applyHookEvent(state, { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "t1", tool_name: "Bash", tool_input: command }, 2_000);
-    return applyHookEvent(state, { hook_event_name: "PermissionRequest", session_id: S, tool_name: "Bash", tool_input: command }, 2_030);
-  };
-  const statusOf = (state: OfficeState) => session(state).characters.map((c) => [c.id, c.status]);
+// 허용 창이 떠 있는데 화면에 ?가 없는 것이 가장 나쁜 실패다. hook을 놓쳐도 ?는 만든다.
+describe("hook을 놓쳐도 허용 대기는 보인다", () => {
+  const push = { command: "git push" };
+  const permission = { hook_event_name: "PermissionRequest", session_id: S, tool_name: "Bash", tool_input: push };
+  const statusOf = (state: OfficeState) => session(state).characters.map((c) => [c.id, c.status, Boolean(c.orphan)]);
 
-  test("허용 대기 중 새 프롬프트가 오면 거절로 보고 거절됨 상태가 된다", () => {
-    const state = applyHookEvent(waitingState(), { hook_event_name: "UserPromptSubmit", session_id: S, prompt: "다른 걸 해줘" }, 9_000);
+  test("PreToolUse를 놓쳐 짝지을 캐릭터가 없어도 허용 요청만으로 ? 캐릭터를 만든다", () => {
+    const state = apply(emptyOfficeState(), connect, permission);
+    const [character] = session(state).characters;
 
-    expect(statusOf(state)).toEqual([["t1", "denied"]]);
+    expect(character).toMatchObject({ status: "waiting", orphan: true, toolName: "Bash", label: "Bash · git push" });
+    expect(session(state).lit).toBe(true);
   });
 
-  test("허용 대기 중 Stop이 오면 거절로 보고, 일하던 호출은 끝난 것으로 정리한다", () => {
-    let state = waitingState();
-    state = applyHookEvent(state, { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "t2", tool_name: "Read", tool_input: {} }, 2_040);
-    state = applyHookEvent(state, { hook_event_name: "Stop", session_id: S }, 9_000);
+  test("그 호출의 Post hook이 오면 진짜 id를 이어 붙이고 허용된 것으로 끝낸다", () => {
+    const state = apply(emptyOfficeState(), connect, permission, {
+      hook_event_name: "PostToolUse",
+      session_id: S,
+      tool_use_id: "real",
+      tool_name: "Bash",
+      tool_input: push,
+    });
 
-    expect(statusOf(state)).toEqual([["t1", "denied"]]);
-    expect(session(state).doneCount).toBe(1);
+    expect(statusOf(state)).toEqual([["real", "approved", false]]);
   });
 
-  test("3초 넘게 기다린 뒤 새 호출이 시작되면 거절로 본다", () => {
-    const state = applyHookEvent(
-      waitingState(),
-      { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "t2", tool_name: "Read", tool_input: {} },
-      5_100
-    );
+  test("transcript가 도구와 입력을 붙여 거절을 알려 주면 그 ? 캐릭터가 거절됨이 된다", () => {
+    const state = apply(emptyOfficeState(), connect, permission, {
+      hook_event_name: "TranscriptNotExecuted",
+      session_id: S,
+      tool_use_id: "real",
+      tool_name: "Bash",
+      tool_input: push,
+      rejected: true,
+    });
 
-    expect(statusOf(state)).toEqual([["t1", "denied"], ["t2", "working"]]);
+    expect(statusOf(state)).toEqual([["real", "denied", false]]);
   });
 
-  test("거의 동시에 시작된 병렬 호출은 거절로 보지 않는다", () => {
-    const state = applyHookEvent(
-      waitingState(),
-      { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "t2", tool_name: "Read", tool_input: {} },
-      4_000
-    );
+  test("늦게 도착한 PreToolUse는 ? 캐릭터에 이어 붙고 캐릭터를 하나 더 만들지 않는다", () => {
+    const state = apply(emptyOfficeState(), connect, permission, {
+      hook_event_name: "PreToolUse",
+      session_id: S,
+      tool_use_id: "real",
+      tool_name: "Bash",
+      tool_input: push,
+    });
 
-    expect(statusOf(state)).toEqual([["t1", "waiting"], ["t2", "working"]]);
+    expect(statusOf(state)).toEqual([["real", "waiting", false]]);
   });
 
-  test("허용되어 호출이 끝나면 거절로 보지 않고 그냥 나간다", () => {
-    let state = waitingState();
-    state = applyHookEvent(state, { hook_event_name: "PostToolUse", session_id: S, tool_use_id: "t1", tool_name: "Bash" }, 6_000);
-    state = applyHookEvent(state, { hook_event_name: "UserPromptSubmit", session_id: S }, 9_000);
+  test("이어 붙일 신호가 끝내 없으면 턴이 끝날 때 중단됨으로 나간다", () => {
+    const state = apply(emptyOfficeState(), connect, permission, { hook_event_name: "Stop", session_id: S });
 
-    expect(session(state).characters).toEqual([]);
-    expect(session(state).doneCount).toBe(1);
+    expect(statusOf(state)).toEqual([[expect.stringMatching(/^permission-/), "cancelled", true]]);
+  });
+});
+
+describe("서버가 세션의 시작을 보지 못했을 때", () => {
+  const pre = { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "t1", tool_name: "Read", tool_input: {} };
+
+  test("연결 신호가 아닌 이벤트로 처음 알게 된 세션은 이전 상태를 모른다고 표시한다", () => {
+    expect(session(apply(emptyOfficeState(), pre))).toMatchObject({ priorUnknown: true });
+    expect(session(apply(emptyOfficeState(), connect, pre))).toMatchObject({ priorUnknown: false });
   });
 
-  test("일하는 중인 호출은 새 프롬프트가 와도 그대로 둔다", () => {
-    let state = applyHookEvent(emptyOfficeState(), connect, 1_000);
-    state = applyHookEvent(state, { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "t1", tool_name: "Read", tool_input: {} }, 2_000);
-    state = applyHookEvent(state, { hook_event_name: "UserPromptSubmit", session_id: S }, 9_000);
+  test("이전 상태를 모르는 동안은 일이 끝나도 불을 끄지 않는다", () => {
+    const state = apply(emptyOfficeState(), pre, { hook_event_name: "PostToolUse", session_id: S, tool_use_id: "t1" });
 
-    expect(statusOf(state)).toEqual([["t1", "working"]]);
+    expect(session(state)).toMatchObject({ characters: [], doneCount: 1, priorUnknown: true, lit: true });
+  });
+
+  test("턴이 끝나면 남은 허용 창이 없으므로 다시 상태를 알고, 일이 없으면 불이 꺼진다", () => {
+    const state = apply(emptyOfficeState(), pre, { hook_event_name: "Stop", session_id: S });
+
+    expect(session(state)).toMatchObject({ priorUnknown: false, lit: false });
+  });
+
+  test("이벤트를 반영해도 서버 instance 값은 그대로 남는다", () => {
+    const state = applyHookEvent({ ...emptyOfficeState(), instance: "server-1" }, connect, 1_000);
+
+    expect(state.instance).toBe("server-1");
   });
 });
 

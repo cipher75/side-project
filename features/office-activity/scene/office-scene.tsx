@@ -16,9 +16,11 @@ type OfficeSceneProps = {
   // 한 번이라도 일이 끝난 세션인지에 따라 불이 꺼진 이유를 다르게 안내한다.
   hadWork: boolean;
   connected: boolean;
+  // 장면이 지금 상태를 보여준다고 믿을 수 없을 때의 경고. 다른 안내보다 먼저, 캐릭터가 있어도 보여준다.
+  alert?: string;
 };
 
-export function OfficeScene({ characters, lit, hadWork, connected }: OfficeSceneProps) {
+export function OfficeScene({ characters, lit, hadWork, connected, alert }: OfficeSceneProps) {
   const [engine] = useState(() => new SceneEngine());
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   const bgRef = useRef<HTMLCanvasElement>(null);
@@ -82,7 +84,13 @@ export function OfficeScene({ characters, lit, hadWork, connected }: OfficeScene
           <WalkerBubble key={w.id} walker={w} />
         ))}
       </div>
-      {empty && note ? <div className={styles.note}>{note}</div> : null}
+      {alert ? (
+        <div className={cn(styles.note, styles.alert)} role="alert">
+          {alert}
+        </div>
+      ) : empty && note ? (
+        <div className={styles.note}>{note}</div>
+      ) : null}
     </div>
   );
 }
@@ -119,7 +127,14 @@ function WalkerBubble({ walker }: { walker: Walker }) {
 
   return (
     <div
-      className={cn(styles.bubble, edge, walker.bubble === "ask" && styles.ask, walker.bubble === "sad" && styles.sad)}
+      className={cn(
+        styles.bubble,
+        edge,
+        walker.bubble === "ask" && styles.ask,
+        walker.bubble === "sad" && styles.sad,
+        walker.bubble === "glad" && styles.glad,
+        walker.bubble === "stop" && styles.stop
+      )}
       style={{ ...position(walker), ...kindColor, opacity: walker.fading ? 0 : 1 }}
     >
       {walker.bubble === "ask" ? (
@@ -129,6 +144,10 @@ function WalkerBubble({ walker }: { walker: Walker }) {
         </>
       ) : walker.bubble === "sad" ? (
         "거절됨 · 퇴근할게요"
+      ) : walker.bubble === "glad" ? (
+        "허용됨 · 일 마쳤어요"
+      ) : walker.bubble === "stop" ? (
+        "중단됨 · 퇴근할게요"
       ) : (
         <>
           <i className={styles.dot} />
