@@ -67,6 +67,9 @@ export const emptyReaderState = (): ReaderState => ({ pending: [], calls: {} });
 // 값이 바뀌면 거절이 중단으로 보일 뿐, 하지 않은 거절을 보여주지는 않는다.
 const REJECTED_RESULT = "User rejected tool use";
 const REJECTED_MESSAGE = "The user doesn't want to proceed with this tool use.";
+// 세션이 끊겼다가 이어질 때 Claude Code가 끝나지 않은 호출에 붙이는 결과다. 실행되었는지 모른다고 스스로
+// 적으므로 실행 여부를 판단하지 않는다. 실행되지 않았다고 보면 Post hook을 받은 호출과 어긋나 판단이 꺼진다.
+const UNKNOWN_OUTCOME = "[Tool call interrupted: the session ended before this call's result was recorded";
 
 // transcript만으로 호출의 실행 여부를 정한다. 결과의 문구는 보지 않고, 줄의 순서만 본다.
 // Claude Code는 실행된 호출의 결과 줄 바로 다음에 PostToolUse hook 기록(성공이든 실패든)을 남긴다.
@@ -84,8 +87,8 @@ export function readCallOutcomes(state: ReaderState, lines: string): { state: Re
 
     const results = resultsOf(entry);
     if (results.length) {
-      for (const result of results) {
-        open.push({ ...result, ...calls[result.toolUseId] });
+      for (const { unknown, ...result } of results) {
+        if (!unknown) open.push({ ...result, ...calls[result.toolUseId] });
         delete calls[result.toolUseId];
       }
       continue;
@@ -116,14 +119,15 @@ function toolUsesOf(entry: Record<string, unknown>): Record<string, CallInfo> {
   return calls;
 }
 
-function resultsOf(entry: Record<string, unknown>): PendingResult[] {
+function resultsOf(entry: Record<string, unknown>): (PendingResult & { unknown: boolean })[] {
   if (entry.type !== "user" || !isRecord(entry.message) || !Array.isArray(entry.message.content)) return [];
   const summary = entry.toolUseResult;
   const async = isRecord(summary) && summary.isAsync === true;
   return entry.message.content.filter(isRecord).flatMap((block) => {
     if (block.type !== "tool_result" || typeof block.tool_use_id !== "string") return [];
     const rejected = summary === REJECTED_RESULT || isRejectionText(summary) || isRejectionText(textOf(block.content));
-    return [{ toolUseId: block.tool_use_id, async, rejected }];
+    const unknown = textOf(block.content).startsWith(UNKNOWN_OUTCOME);
+    return [{ toolUseId: block.tool_use_id, async, rejected, unknown }];
   });
 }
 
