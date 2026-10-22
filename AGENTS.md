@@ -44,3 +44,12 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - 자동 코드 리뷰는 최대 1회, 가장 낮은 강도(`code-review low`)로만 돌린다. 리뷰어를 못 부르면 그 사실만 적고 완료로 본다.
 - 지적 중 스펙의 수용 기준을 깨거나 주 경로가 실제로 깨지는 것만 고친다. 나머지는 `docs/follow-ups/`에 한 줄로 남긴다. 재리뷰는 하지 않는다.
 - 스펙이 요구하지 않은 보안 하드닝·엣지케이스·성능 방어는 범위 밖이다.
+
+<!-- BEGIN:vercel-live-docs -->
+
+# Vercel 최신 문서
+
+- Vercel 배포, 환경 변수, Functions, 저장소(Redis·Blob), GitHub 연동처럼 Vercel에 기대는 일을 시작할 때는 먼저 공식 문서 색인 https://vercel.com/llms.txt 를 가져와 필요한 문서 링크(`.md` 주소)를 확인한다. 전체 문서가 필요하면 https://vercel.com/docs/llms-full.txt 를 쓴다.
+- 가져온 문서가 설치된 `vercel` CLI나 `package.json`의 `next` 버전과 어긋나면 설치된 버전을 기준으로 맞춘다. 문서를 가져오지 못했으면 기억이나 복사본으로 대신하지 말고 못 가져왔다고 알린다.
+
+<!-- END:vercel-live-docs -->
