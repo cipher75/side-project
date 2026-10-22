@@ -7,12 +7,9 @@ import type {
 
 type Payload = Record<string, unknown>;
 
-// 거절된 캐릭터가 퇴근 장면을 보여줄 시간. 이 시간이 지난 뒤 오는 이벤트에서 정리한다.
-const DENIED_KEEP_MS = 8_000;
+// 허용되거나 거절된 캐릭터가 퇴근 장면을 보여줄 시간. 판단이 아니라 화면 정리에만 쓴다.
+const ENDED_KEEP_MS = 8_000;
 const LABEL_MAX = 40;
-// Claude Code는 거절을 알려 주지 않는다. 허용 대기가 이 시간보다 길어진 뒤 새 호출이 시작되면 거절로 추정한다.
-// 거의 동시에 시작된 병렬 호출을 거절로 오해하지 않기 위한 여유다.
-const STALE_WAIT_MS = 3_000;
 
 export function emptyOfficeState(): OfficeState {
   return { sessions: {}, order: [] };
@@ -27,22 +24,21 @@ export function applyHookEvent(
   if (!sessionId) return state;
 
   const eventName = text(payload.hook_event_name);
-  let session = pruneDenied(
-    state.sessions[sessionId] ?? newSession(sessionId, payload),
+  let session = pruneEnded(
+    state.sessions[sessionId] ?? newSession(sessionId, payload, eventName),
     now
   );
   session = withName(session, payload);
+  if (eventName && CARRIES_CALL_ID.has(eventName)) session = adoptOrphan(session, payload);
 
   switch (eventName) {
     case "OfficeConnect":
       session = { ...session, connected: true };
       break;
-    case "UserPromptSubmit":
-      session = { ...denyWaiting(session, now), connected: true };
-      break;
     case "PreToolUse":
-      session = denyWaiting(session, now, STALE_WAIT_MS);
-      session = { ...session, connected: true, characters: [...session.characters, startCharacter(payload, now)] };
+      if (!session.characters.some((c) => c.id === text(payload.tool_use_id))) {
+        session = { ...session, connected: true, characters: [...session.characters, startCharacter(payload, now)] };
+      }
       break;
     case "UserPromptExpansion":
       session = { ...session, connected: true, characters: addSlashSkill(session.characters, payload, now) };
@@ -50,19 +46,44 @@ export function applyHookEvent(
     case "PermissionRequest":
       session = markWaiting(session, payload, now);
       break;
+    // 거절과 중단은 추정하지 않는다. 다음 신호만 쓰고, 모두 tool_use_id로 캐릭터를 찾는다.
+    // PermissionDenied: auto 모드 분류기가 거절했다는 hook.
+    // TranscriptNotExecuted: 서버가 transcript에서 읽은 "실행되지 않은 호출". 결과 줄 다음에
+    // PostToolUse hook 기록이 없으면 실행되지 않은 것이며, 사무실 서버의 응답 시점과는 상관없다.
+    // 실행되지 않은 까닭은 거절만이 아니므로, 결과에 거절의 증거(rejected)가 있을 때만 거절로 보고
+    // 나머지는 중단으로 본다. transcript를 믿을 수 없게 된 세션에서는 이 신호를 쓰지 않는다.
     case "PermissionDenied":
-      session = markDenied(session, payload, now);
+      session = endUnexecuted(session, text(payload.tool_use_id), "denied", now);
       break;
+    case "TranscriptNotExecuted":
+      if (!session.transcriptUnreliable) {
+        session = endUnexecuted(session, text(payload.tool_use_id), payload.rejected === true ? "denied" : "cancelled", now);
+      }
+      break;
+    // 서버가 Post hook을 받은 호출을 transcript가 "실행되지 않음"으로 읽었다. 판단기가 바뀐 형식을
+    // 잘못 읽고 있다는 뜻이므로, 이 세션에서는 실행되지 않았다는 transcript 판단을 더 쓰지 않는다.
+    case "TranscriptUnreliable":
+      session = { ...session, transcriptUnreliable: true };
+      break;
+    // 실행되었다는 신호. hook이 바로 오거나, hook이 늦거나 실패해도 transcript의 기록으로 온다.
+    // 둘 다 오면 먼저 온 쪽이 정하고 나중 것은 아무것도 바꾸지 않는다.
     case "PostToolUse":
     case "PostToolUseFailure":
-      // 백그라운드로 시작한 sub-agent는 응답이 시작만 알린다. 끝났다는 이벤트가 오지 않으므로 턴이 끝날 때 정리한다.
-      if (!isAsyncLaunch(payload)) session = finishCharacter(session, text(payload.tool_use_id));
+    case "TranscriptExecuted":
+      // 백그라운드로 시작한 sub-agent는 응답이 시작만 알린다. 끝났다는 hook 이벤트는 오지 않으므로
+      // 캐릭터를 남겨 두고, 서버가 transcript에서 찾은 TranscriptTaskFinished에서 정리한다.
+      if (isAsyncLaunch(payload)) session = markBackground(session, text(payload.tool_use_id));
+      else session = finishCall(session, text(payload.tool_use_id), now);
       break;
+    case "TranscriptTaskFinished":
+      session = finishCall(session, text(payload.tool_use_id), now);
+      break;
+    // 턴이 끝나면 본 세션의 허용 창은 남지 않으므로, 시작을 보지 못한 세션도 이제 상태를 안다.
     case "Stop":
-      session = finishWorking(denyWaiting(session, now));
+      session = { ...finishWorking(cancelWaiting(session, now)), priorUnknown: false };
       break;
     case "SessionEnd":
-      session = { ...finishAll(session), connected: false };
+      session = { ...finishAll(session), connected: false, priorUnknown: false };
       break;
     default:
       session = { ...session, connected: true };
@@ -70,25 +91,35 @@ export function applyHookEvent(
 
   session = { ...session, lit: isLit(session) };
   return {
+    ...state,
     sessions: { ...state.sessions, [sessionId]: session },
     order: state.order.includes(sessionId) ? state.order : [...state.order, sessionId],
   };
 }
 
-// 이벤트가 오지 않아도 시간이 지난 거절 캐릭터를 정리한다.
+// 이벤트가 오지 않아도 퇴근 장면이 끝난 캐릭터를 정리한다.
 export function pruneOfficeState(state: OfficeState, now: number): OfficeState {
   let changed = false;
   const sessions: Record<string, Session> = {};
   for (const [id, session] of Object.entries(state.sessions)) {
-    const pruned = pruneDenied(session, now);
+    const pruned = pruneEnded(session, now);
     if (pruned !== session) changed = true;
     sessions[id] = pruned === session ? session : { ...pruned, lit: isLit(pruned) };
   }
   return changed ? { ...state, sessions } : state;
 }
 
-function newSession(id: string, payload: Payload): Session {
-  return { id, name: sessionName(payload) ?? id.slice(0, 8), connected: false, lit: false, doneCount: 0, characters: [] };
+// 연결 신호가 아닌 이벤트로 처음 알게 된 세션은, 서버가 그 앞의 일(허용 대기 포함)을 보지 못한 것이다.
+function newSession(id: string, payload: Payload, eventName: string | undefined): Session {
+  return {
+    id,
+    name: sessionName(payload) ?? id.slice(0, 8),
+    connected: false,
+    lit: false,
+    doneCount: 0,
+    priorUnknown: eventName !== "OfficeConnect",
+    characters: [],
+  };
 }
 
 function withName(session: Session, payload: Payload): Session {
@@ -100,16 +131,20 @@ function sessionName(payload: Payload): string | undefined {
   return text(payload.project) ?? lastSegment(text(payload.cwd));
 }
 
+// 퇴근 중인(approved, denied, cancelled) 캐릭터는 불을 켜 두지 않는다. 화면은 그 캐릭터가 문을 나갈 때까지 불을 유지한다.
+// 그전 상태를 모르는 세션은 남은 허용 대기가 있을 수 있으므로 "모두 끝남"을 뜻하는 불 꺼짐을 보이지 않는다.
 function isLit(session: Session): boolean {
-  return session.connected && (session.characters.length > 0 || session.doneCount === 0);
+  const active = session.characters.some((c) => c.status === "working" || c.status === "waiting");
+  return session.connected && (active || session.doneCount === 0 || session.priorUnknown === true);
 }
 
-function pruneDenied(session: Session, now: number): Session {
-  const kept = session.characters.filter(
-    (c) => !(c.status === "denied" && c.deniedAt !== undefined && now - c.deniedAt > DENIED_KEEP_MS)
-  );
-  const removed = session.characters.length - kept.length;
-  return removed ? { ...session, characters: kept, doneCount: session.doneCount + removed } : session;
+function isEnded(c: Character): boolean {
+  return c.status === "approved" || c.status === "denied" || c.status === "cancelled";
+}
+
+function pruneEnded(session: Session, now: number): Session {
+  const kept = session.characters.filter((c) => !(isEnded(c) && now - (c.endedAt ?? now) > ENDED_KEEP_MS));
+  return kept.length === session.characters.length ? session : { ...session, characters: kept };
 }
 
 function startCharacter(payload: Payload, now: number): Character {
@@ -168,41 +203,82 @@ function targetOf(fields: Record<string, unknown>): string | undefined {
 function markWaiting(session: Session, payload: Payload, now: number): Session {
   const toolName = text(payload.tool_name);
   const key = stable(payload.tool_input);
-  const open = session.characters.filter((c) => c.status === "working" && c.toolName === toolName);
+  // 허용 요청에는 tool_use_id가 없어 도구 이름과 입력으로 짝짓는다. Claude Code는 호출을 시작하며
+  // PreToolUse를 보낸 직후 그 호출의 허용을 묻는다(실제 세션 33건 모두 가장 최근에 시작한 호출이었고,
+  // 간격은 19–127ms). 그래서 가장 최근에 시작한 호출부터 짝짓는다. 입력이 같은 호출끼리 짝이
+  // 틀려도 finishCall이 실제로 실행된 호출로 바로잡는다.
+  const open = session.characters.filter((c) => c.status === "working" && !c.background && c.toolName === toolName);
+  // 입력 표현이 달라 같은 입력을 못 찾아도, 허용 대기를 놓치는 것이 더 나쁘므로 가장 최근 호출로 짝짓는다.
   const target = [...open].reverse().find((c) => stable(c.toolInput) === key) ?? open[open.length - 1];
-  if (!target) return session;
-  return replace(session, target.id, { status: "waiting", waitingAt: now });
+  if (target) return replace(session, target.id, { status: "waiting", waitingAt: now });
+
+  // 짝지을 캐릭터가 없다는 것은 서버가 그 호출의 PreToolUse hook을 놓쳤다는 뜻이다(서버 오류, 재시작 등).
+  // 허용 창은 떠 있으므로 허용 요청의 도구와 입력으로 허용 대기 캐릭터를 만든다. 진짜 tool_use_id는
+  // 그 호출의 다음 신호가 올 때 adoptOrphan이 이어 붙인다.
+  if (!toolName) return session;
+  const orphan: Character = {
+    ...startCharacter(payload, now),
+    id: `permission-${now}-${session.characters.length}`,
+    status: "waiting",
+    waitingAt: now,
+    orphan: true,
+  };
+  return { ...session, connected: true, characters: [...session.characters, orphan] };
 }
 
-// 끝나지 않은 허용 대기 호출을 거절로 추정한다. minWait가 있으면 그보다 오래 기다린 것만 대상으로 한다.
-function denyWaiting(session: Session, now: number, minWait?: number): Session {
-  const stale = (c: Character) =>
-    c.status === "waiting" && (minWait === undefined || now - (c.waitingAt ?? now) > minWait);
-  if (!session.characters.some(stale)) return session;
+// tool_use_id를 담고 오는 신호들. 이 id를 모르는 캐릭터에게 이어 붙일 수 있다.
+const CARRIES_CALL_ID = new Set([
+  "PreToolUse",
+  "PostToolUse",
+  "PostToolUseFailure",
+  "PermissionDenied",
+  "TranscriptExecuted",
+  "TranscriptNotExecuted",
+]);
+
+// 처음 보는 tool_use_id의 신호가 오면, 같은 도구와 입력으로 만들어 둔 id 없는 허용 대기 캐릭터에 이어 붙인다.
+function adoptOrphan(session: Session, payload: Payload): Session {
+  const id = text(payload.tool_use_id);
+  const toolName = text(payload.tool_name);
+  if (!id || !toolName || session.characters.some((c) => c.id === id)) return session;
+  const key = stable(payload.tool_input);
+  const orphans = session.characters.filter((c) => c.orphan && c.toolName === toolName);
+  const orphan = [...orphans].reverse().find((c) => stable(c.toolInput) === key) ?? orphans[orphans.length - 1];
+  if (!orphan) return session;
   return {
     ...session,
-    characters: session.characters.map((c) => (stale(c) ? { ...c, status: "denied", deniedAt: now } : c)),
+    characters: session.characters.map((c) => (c === orphan ? { ...c, id, orphan: false } : c)),
   };
 }
 
-// 일하던 호출만 끝난 것으로 정리하고, 허용 대기였다가 거절로 추정된 캐릭터는 퇴근 장면을 위해 남긴다.
-function finishWorking(session: Session): Session {
-  const working = session.characters.filter((c) => c.status === "working").length;
+// transcript를 읽지 못했을 때를 위한 대비: 턴이 끝났다면 허용 창은 이미 닫혔고,
+// 그때까지 실행되지 않은 허용 대기 호출은 실행되지 않은 것이다. 거절의 증거는 없으므로 중단으로 본다.
+function cancelWaiting(session: Session, now: number): Session {
+  const waiting = session.characters.filter((c) => c.status === "waiting").length;
+  if (!waiting) return session;
   return {
     ...session,
-    characters: session.characters.filter((c) => c.status !== "working"),
+    characters: session.characters.map((c) => (c.status === "waiting" ? { ...c, status: "cancelled", endedAt: now } : c)),
+    doneCount: session.doneCount + waiting,
+  };
+}
+
+// 일하던 호출만 끝난 것으로 정리하고, 퇴근 중인 캐릭터는 퇴근 장면을 위해 남긴다.
+function finishWorking(session: Session): Session {
+  const finishing = (c: Character) => c.status === "working" && !c.background;
+  const working = session.characters.filter(finishing).length;
+  return {
+    ...session,
+    characters: session.characters.filter((c) => !finishing(c)),
     doneCount: session.doneCount + working,
   };
 }
 
-function markDenied(session: Session, payload: Payload, now: number): Session {
-  const id = text(payload.tool_use_id);
-  const toolName = text(payload.tool_name);
-  const target =
-    session.characters.find((c) => c.id === id) ??
-    [...session.characters].reverse().find((c) => c.status === "waiting" && c.toolName === toolName);
-  if (!target) return session;
-  return replace(session, target.id, { status: "denied", deniedAt: now });
+// 아직 끝나지 않은 호출만 거절로 바꾼다. 이미 Post hook으로 끝났거나 백그라운드로 도는 호출은 그대로 둔다.
+function endUnexecuted(session: Session, id: string | undefined, status: "denied" | "cancelled", now: number): Session {
+  const target = session.characters.find((c) => c.id === id);
+  if (!target || !(target.status === "waiting" || (target.status === "working" && !target.background))) return session;
+  return { ...replace(session, target.id, { status, endedAt: now }), doneCount: session.doneCount + 1 };
 }
 
 function isAsyncLaunch(payload: Payload): boolean {
@@ -210,21 +286,40 @@ function isAsyncLaunch(payload: Payload): boolean {
   return isRecord(response) && response.isAsync === true;
 }
 
-function finishCharacter(session: Session, id: string | undefined): Session {
-  if (!id || !session.characters.some((c) => c.id === id)) return session;
+// 호출이 실행되어 끝났다. 허용 대기였던 호출은 허용된 것이므로 퇴근 장면을 위해 approved로 남긴다.
+function finishCall(session: Session, id: string | undefined, now: number): Session {
+  const target = session.characters.find((c) => c.id === id);
+  if (!target || isEnded(target)) return session;
+  const done = { ...session, doneCount: session.doneCount + 1 };
+  const misplaced = target.status === "working" && !target.background ? waitingTwin(session, target) : undefined;
+  if (target.status === "waiting" || misplaced) {
+    const fixed = misplaced ? replace(done, misplaced.id, { status: "working", waitingAt: undefined }) : done;
+    return replace(fixed, target.id, { status: "approved", endedAt: now });
+  }
+  return { ...done, characters: session.characters.filter((c) => c.id !== target.id) };
+}
+
+// 입력이 같은 호출은 권한 규칙이 똑같이 적용되므로 둘 다 허용이 필요하다. 그런데 회의실에 있지 않던
+// 호출이 실행되었다면, 허용 요청을 받은 것은 이 호출이었다. 회의실에 잘못 보낸 같은 입력의 호출을 찾는다.
+function waitingTwin(session: Session, target: Character): Character | undefined {
+  const key = stable(target.toolInput);
+  return session.characters.find(
+    (c) => c.id !== target.id && c.status === "waiting" && c.toolName === target.toolName && stable(c.toolInput) === key
+  );
+}
+
+// 세션이 끝나면 남은 호출은 모두 나간다. 허용 여부를 알 수 없으므로 허용 대기도 그냥 나가게 한다.
+function finishAll(session: Session): Session {
+  const open = session.characters.filter((c) => !isEnded(c));
   return {
     ...session,
-    characters: session.characters.filter((c) => c.id !== id),
-    doneCount: session.doneCount + 1,
+    characters: session.characters.filter(isEnded),
+    doneCount: session.doneCount + open.length,
   };
 }
 
-function finishAll(session: Session): Session {
-  return {
-    ...session,
-    characters: [],
-    doneCount: session.doneCount + session.characters.length,
-  };
+function markBackground(session: Session, id: string | undefined): Session {
+  return id ? replace(session, id, { background: true }) : session;
 }
 
 function replace(session: Session, id: string, patch: Partial<Character>): Session {
