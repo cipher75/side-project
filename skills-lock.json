@@ -132,6 +132,12 @@
       "sourceType": "github",
       "skillPath": "skills/workflow/update-project-skills/SKILL.md",
       "computedHash": "d32afd997c10adf6707b80ab0ee30c37638dc53b5f728dd539ce5ff058c0a432"
+    },
+    "vercel-cli": {
+      "source": "vercel/vercel",
+      "sourceType": "github",
+      "skillPath": "skills/vercel-cli/SKILL.md",
+      "computedHash": "bc312e5c407c79c264503ef588613ee697508636b8e6ba76ee2585979b49ba2b"
     }
   }
 }
