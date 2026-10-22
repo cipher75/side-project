@@ -84,7 +84,7 @@ PC에서 도는 사무실 화면을 내 다른 기기(모바일, 다른 PC)에�
 
 ## 보류한 결정
 
-- **호스팅의 저장 기술과 갱신 방식:** 구현을 정할 때 고릅니다. 후보는 Vercel 마켓플레이스의 저장소(Blob, Redis 등)이며, Vercel 서버리스는 서버 메모리와 오래 유지되는 연결(SSE)이 맞지 않는 점을 반영해야 합니다. 어느 쪽이든 "보내는 내용" 경계 안이어야 합니다.
+- **호스팅의 저장 기술과 갱신 방식:** 정했습니다. Upstash Redis에 두고 기기가 주기적으로 조회합니다. 근거와 값은 [hosted-state-storage](../../decisions/hosted-state-storage.md)에 있고, 설정 방법은 [hosting-setup](../../hosting-setup.md)에 있습니다.
 - **로컬 서버를 안정적으로 켜 두는 방법:** `next dev` 대신 빌드한 서버로 돌리는 것을 포함해, 호스팅 전달이 꺼지지 않게 하는 방법입니다. [office-activity-view 스펙](../office-activity-view/spec.md)의 남은 위험과 같은 문제입니다.
 - **토큰 교체 절차:** 토큰이 새었을 때 바꾸는 방법과 기기 정리의 세부입니다.
 

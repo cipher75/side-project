@@ -1,3 +1,7 @@
+import { hostname } from "node:os";
+
+import { relayConfigFromEnv } from "./hosted/deployment";
+import { createRelay } from "./hosted/relay";
 import { recordRawEvent } from "./raw-event-log";
 import { applyHookEvent, emptyOfficeState, pruneOfficeState } from "./session-state";
 import { finishedTaskToolUseIds } from "./task-notification";
@@ -88,6 +92,18 @@ function followTranscripts(payload: Record<string, unknown>) {
       ingestHookEvent({ hook_event_name: "TranscriptTaskFinished", session_id: sessionId, tool_use_id: toolUseId });
     }
   });
+}
+
+// 호스팅 주소와 보내기 토큰이 설정되어 있으면, 줄인 상태를 호스팅으로 올리는 전달기를 켠다.
+// 서버가 켜질 때 한 번 부르며, 여러 번 불러도 하나만 돈다.
+type RelayGlobal = typeof globalThis & { __officeRelay?: ReturnType<typeof createRelay> };
+
+export function startHostedRelayFromEnv(): void {
+  const config = relayConfigFromEnv(process.env, hostname());
+  const g = globalThis as RelayGlobal;
+  if (!config || g.__officeRelay) return;
+  g.__officeRelay = createRelay({ ...config, getState: () => officeSnapshot(), subscribe: subscribeOffice });
+  g.__officeRelay.start();
 }
 
 export function officeSnapshot(now = Date.now()): OfficeState {

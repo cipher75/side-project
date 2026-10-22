@@ -1,3 +1,4 @@
+import { isHostedDeployment } from "@/features/office-activity/hosted/deployment";
 import { officeSnapshot, pruneAndNotify, subscribeOffice } from "@/features/office-activity/server";
 
 // 화면이 구독하는 SSE 스트림: 연결하자마자 현재 상태를 보내고, 이후 바뀔 때마다 보낸다.
@@ -7,6 +8,8 @@ const HEARTBEAT_MS = 15_000;
 const PRUNE_MS = 3_000;
 
 export async function GET(request: Request) {
+  // 호스팅 배포에는 PC의 hook이 오지 않는다. 이 길은 내 PC의 로컬 서버에만 있다.
+  if (isHostedDeployment()) return new Response(null, { status: 404 });
   const encoder = new TextEncoder();
   let cleanup = () => {};
 

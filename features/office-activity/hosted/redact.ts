@@ -1,0 +1,55 @@
+import type { Character, OfficeState, Session } from "../types";
+
+// 호스팅으로 보내기 전에 상태를 줄인다. PC를 떠나는 것은 호출의 상태와 종류, 도구 이름, 파일 이름,
+// skill과 sub-agent 이름뿐이고, 명령 내용, URL, 검색어, 프롬프트, 전체 경로는 남기지 않는다.
+// ([local-first-deployment] 결정과 hosted-personal-view 스펙의 "보내는 내용")
+
+const LABEL_MAX = 40;
+// 이 도구들만 입력의 파일 경로에서 파일 이름을 라벨로 쓴다. 다른 도구의 path는 폴더일 수 있어 쓰지 않는다.
+const FILE_TOOLS = new Set(["Read", "Edit", "Write", "MultiEdit", "NotebookEdit"]);
+
+export function redactState(state: OfficeState): OfficeState {
+  const sessions: Record<string, Session> = {};
+  for (const [id, session] of Object.entries(state.sessions)) {
+    sessions[id] = { ...session, characters: session.characters.map(redactCharacter) };
+  }
+  return { ...state, sessions };
+}
+
+function redactCharacter(character: Character): Character {
+  return { ...character, label: hostedLabel(character), toolInput: null };
+}
+
+function hostedLabel(character: Character): string {
+  if (character.kind === "skill") return truncate(character.label);
+  if (character.kind === "sub") {
+    const type = text(record(character.toolInput).subagent_type);
+    return type ? truncate(`서브에이전트 · ${type}`) : "서브에이전트";
+  }
+
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(character.toolName);
+  if (mcp) return truncate(`${mcp[1]} · ${mcp[2]}`);
+
+  if (FILE_TOOLS.has(character.toolName)) {
+    const input = record(character.toolInput);
+    const file = lastSegment(text(input.file_path) ?? text(input.notebook_path));
+    if (file) return truncate(`${character.toolName} · ${file}`);
+  }
+  return truncate(character.toolName);
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function text(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function lastSegment(path: string | undefined): string | undefined {
+  return path?.split(/[\\/]/).filter(Boolean).pop();
+}
+
+function truncate(value: string): string {
+  return value.length > LABEL_MAX ? `${value.slice(0, LABEL_MAX - 1)}…` : value;
+}
