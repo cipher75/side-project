@@ -1,8 +1,13 @@
+import { isHostedDeployment } from "@/features/office-activity/hosted/deployment";
 import { listRawEvents } from "@/features/office-activity/raw-event-log";
 import { ingestHookEvent } from "@/features/office-activity/server";
 
+// 호스팅 배포에는 PC의 hook이 오지 않고, 원본 이벤트에는 명령 내용이 그대로 있다. 이 길은 내 PC의 로컬 서버에만 둔다.
+const notHere = () => new Response(null, { status: 404 });
+
 // hook이 보낸 이벤트는 응답 본문을 비워 두어 Claude Code의 동작(허용 여부 등)에 영향을 주지 않는다.
 export async function POST(request: Request) {
+  if (isHostedDeployment()) return notHere();
   let payload: unknown;
   try {
     payload = await request.json();
@@ -19,5 +24,6 @@ export async function POST(request: Request) {
 
 // 개발 중 hook이 실제로 무엇을 보내는지 확인하기 위한 원본 이벤트 목록.
 export async function GET() {
+  if (isHostedDeployment()) return notHere();
   return Response.json(listRawEvents());
 }
