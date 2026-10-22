@@ -73,6 +73,14 @@ describe("호출의 실행 여부 읽기", () => {
     ]);
   });
 
+  test("세션이 끊겨 결과를 모른다고 적힌 호출은 실행 여부를 판단하지 않는다", () => {
+    // 실제 Claude Code 2.1.304가 세션을 다시 이을 때 끝나지 않은 호출에 붙이는 결과다. 실행되었을 수도 있다.
+    const unknown = "[Tool call interrupted: the session ended before this call's result was recorded, so its outcome is unknown. Check whether it took effect before relying on it or running it again.]";
+    const lines = [result("lost-1", unknown, unknown), result("lost-2", unknown, unknown), result("t1"), postRecord("t1"), assistant];
+
+    expect(read(lines).outcomes.map((o) => [o.toolUseId, o.executed])).toEqual([["t1", true]]);
+  });
+
   test("병렬 호출의 결과 줄이 이어져도 각자의 기록으로 판단한다", () => {
     const lines = [result("a"), result("b"), postRecord("a"), assistant];
 
