@@ -16,7 +16,7 @@ Claude Code와 Claude 데스크톱 앱 세션의 tool, skill, sub-agent 활동�
 ## 범위
 
 - 세션 하나가 사무실 하나입니다. 연결된 세션은 각각 따로 보입니다.
-- 연결된 세션은 이 PC에서만 확인할 수 있고, 계정은 없습니다.
+- 이 스펙의 화면은 이 PC에서만 열리고, 계정은 없습니다. 다른 기기에서 보는 것은 [hosted-personal-view 스펙](../hosted-personal-view/spec.md)이 따로 다룹니다.
 - 캐릭터가 나타나고 움직이고 멈추고 나가는 동작과, 사무실 불이 켜지고 꺼지는 동작을 포함합니다.
 
 ## 동작과 인수 기준
@@ -63,7 +63,7 @@ Claude Code와 Claude 데스크톱 앱 세션의 tool, skill, sub-agent 활동�
 
 ## 확정한 제약과 이유
 
-- **로컬 전용:** 말풍선에 작업 내용이 보이므로 이 PC 밖으로 보내지 않습니다. 근거는 [local-first-deployment](../../decisions/local-first-deployment.md)입니다.
+- **로컬 화면은 로컬 전용:** 말풍선에 작업 내용이 모두 보이므로 이 화면과 hook 처리는 이 PC 안에서만 동작합니다. PC 밖으로는 줄인 상태만 나가며, 그 경계는 [hosted-personal-view 스펙](../hosted-personal-view/spec.md)과 [local-first-deployment](../../decisions/local-first-deployment.md)가 정합니다.
 - **스킬로 지정한 세션에서만 동작:** 지정하지 않은 세션의 활동은 화면에 나타나지 않습니다.
 - **보기 전용:** 화면에서 허용하거나 거절하지 않습니다.
 - **경험 방향:** 젤다의 꿈꾸는 섬을 닮은 큰 머리 캐릭터, 64x64 도트, 풍부한 색, 사무실 배경입니다. 상태는 설명 없이 캐릭터의 움직임과 표정으로 읽혀야 합니다. 직접 그린 그림을 쓰고 원작의 그림은 쓰지 않습니다.
@@ -78,7 +78,7 @@ Claude Code와 Claude 데스크톱 앱 세션의 tool, skill, sub-agent 활동�
 ## 범위 밖
 
 - 화면에서 허용이나 거절을 처리하는 기능: 처리는 앱과 모바일의 몫이기 때문입니다.
-- 다른 기기에서 보기, 여러 사람이 공유하기, 계정: 로컬 우선 결정에 따라 지금은 제외합니다.
+- 여러 사람이 공유하기, 계정: 개인용 결정에 따라 제외합니다. 다른 기기에서 보기는 [hosted-personal-view 스펙](../hosted-personal-view/spec.md)에서 다룹니다.
 - 지난 활동 기록 보관과 재생: 요청하지 않았습니다.
 
 ## 보류한 결정
