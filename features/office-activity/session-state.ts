@@ -90,11 +90,30 @@ export function applyHookEvent(
   }
 
   session = { ...session, lit: isLit(session) };
+  const base = eventName === "OfficeConnect" ? retireReplaced(state, session) : state;
   return {
-    ...state,
-    sessions: { ...state.sessions, [sessionId]: session },
-    order: state.order.includes(sessionId) ? state.order : [...state.order, sessionId],
+    ...base,
+    sessions: { ...base.sessions, [sessionId]: session },
+    order: base.order.includes(sessionId) ? base.order : [...base.order, sessionId],
   };
+}
+
+// /clear는 같은 폴더에서 새 세션을 시작한다. 그때 스킬 hook이 먼저 사라져 이전 세션의 SessionEnd가
+// 오지 않으므로, 같은 폴더에서 새 세션이 연결되면 일하거나 허용을 기다리는 캐릭터가 없는 이전 세션을 정리한다.
+// 같은 폴더에서 세션 둘을 함께 쓰는 중이었다면, 정리된 세션도 다음 이벤트가 오면 다시 나타난다.
+function retireReplaced(state: OfficeState, incoming: Session): OfficeState {
+  const retired = state.order.filter((id) => {
+    const other = state.sessions[id];
+    return id !== incoming.id && other?.name === incoming.name && !other.characters.some(isActive);
+  });
+  if (!retired.length) return state;
+  const sessions = { ...state.sessions };
+  for (const id of retired) delete sessions[id];
+  return { ...state, sessions, order: state.order.filter((id) => !retired.includes(id)) };
+}
+
+function isActive(c: Character): boolean {
+  return c.status === "working" || c.status === "waiting";
 }
 
 // 이벤트가 오지 않아도 퇴근 장면이 끝난 캐릭터를 정리한다.
@@ -134,7 +153,7 @@ function sessionName(payload: Payload): string | undefined {
 // 퇴근 중인(approved, denied, cancelled) 캐릭터는 불을 켜 두지 않는다. 화면은 그 캐릭터가 문을 나갈 때까지 불을 유지한다.
 // 그전 상태를 모르는 세션은 남은 허용 대기가 있을 수 있으므로 "모두 끝남"을 뜻하는 불 꺼짐을 보이지 않는다.
 function isLit(session: Session): boolean {
-  const active = session.characters.some((c) => c.status === "working" || c.status === "waiting");
+  const active = session.characters.some(isActive);
   return session.connected && (active || session.doneCount === 0 || session.priorUnknown === true);
 }
 
