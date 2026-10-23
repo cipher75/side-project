@@ -563,6 +563,31 @@ describe("세션 마무리", () => {
     expect(state.order).toEqual([S, "session-2"]);
   });
 
+  test("/clear로 같은 폴더에 새 세션이 연결되면 일이 없는 이전 세션 탭을 정리한다", () => {
+    const state = apply(
+      emptyOfficeState(),
+      connect,
+      { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "t1", tool_name: "Read", tool_input: {} },
+      { hook_event_name: "Stop", session_id: S },
+      { hook_event_name: "OfficeConnect", session_id: "session-2", project: "side-project" }
+    );
+
+    expect(state.order).toEqual(["session-2"]);
+    expect(state.sessions[S]).toBeUndefined();
+  });
+
+  test("이전 세션에 허용을 기다리거나 일하는 캐릭터가 있으면 정리하지 않는다", () => {
+    const state = apply(
+      emptyOfficeState(),
+      connect,
+      { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "t1", tool_name: "Bash", tool_input: { command: "x" } },
+      { hook_event_name: "PermissionRequest", session_id: S, tool_name: "Bash", tool_input: { command: "x" } },
+      { hook_event_name: "OfficeConnect", session_id: "session-2", project: "side-project" }
+    );
+
+    expect(state.order).toEqual([S, "session-2"]);
+  });
+
   test("session_id가 없는 이벤트는 무시한다", () => {
     const state = apply(emptyOfficeState(), { hook_event_name: "PreToolUse" });
 

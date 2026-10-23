@@ -28,6 +28,21 @@ beforeEach(() => {
   HTMLCanvasElement.prototype.getContext = vi.fn(() => null) as never;
 });
 
+describe("세션 탭", () => {
+  test("새 세션이 연결되면 그 탭을 바로 보여준다", () => {
+    render(<OfficeView />);
+    const session = (id: string, name: string) => ({
+      id, name, connected: true, lit: true, doneCount: 0, characters: [],
+    });
+    send({ ...empty("i1"), sessions: { a: session("a", "blog") }, order: ["a"] });
+    act(() => screen.getByRole("tab", { name: /blog/ }).click());
+
+    send({ ...empty("i1"), sessions: { a: session("a", "blog"), b: session("b", "shop") }, order: ["a", "b"] });
+
+    expect(screen.getByRole("tab", { name: /shop/ })).toHaveAttribute("aria-selected", "true");
+  });
+});
+
 describe("화면이 지금 상태를 보여주지 못할 때", () => {
   test("서버와 연결이 끊기면 앱에서 확인하라고 알리고, 다시 연결되면 알림을 거둔다", () => {
     render(<OfficeView />);

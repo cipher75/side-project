@@ -36,6 +36,8 @@ type Internal = Walker & {
   slot: number;
   frameTime: number;
   fadeTime: number;
+  // 일을 마친 뒤 사무실을 더 돌아다닐 남은 시간(초). 음수면 아직 일하는 중이다.
+  linger: number;
 };
 
 const LIGHTS_OFF_DELAY = 1.5;
@@ -44,6 +46,8 @@ const SAD_PAUSE = 1.2;
 const GLAD_PAUSE = 1.2;
 const STOP_PAUSE = 1.2;
 const FRAME_TIME = 0.17;
+// 일을 마친 캐릭터가 바로 나가지 않고 더 돌아다니는 시간. 짧은 호출도 화면에서 볼 수 있게 한다.
+const LINGER = 3;
 
 export class SceneEngine {
   private items: Internal[] = [];
@@ -72,11 +76,16 @@ export class SceneEngine {
     for (const character of characters) {
       if (this.departed.has(character.id)) continue;
       const walker = this.items.find((w) => w.id === character.id);
-      if (walker) this.update(walker, character);
+      if (walker) {
+        walker.linger = -1;
+        this.update(walker, character);
+      }
       else this.spawn(character, placed);
     }
     for (const walker of this.items) {
-      if (!ids.has(walker.id) && walker.phase !== "leaving") this.leave(walker);
+      if (ids.has(walker.id) || walker.phase === "leaving" || walker.linger >= 0) continue;
+      if (walker.phase === "to-work" || walker.phase === "idle") walker.linger = LINGER;
+      else this.leave(walker);
     }
     if (serverLit || this.items.length > 0) this.turnOn();
   }
@@ -115,6 +124,7 @@ export class SceneEngine {
       slot: -1,
       frameTime: 0,
       fadeTime: 0,
+      linger: -1,
     };
     this.items.push(walker);
     this.update(walker, character, true);
@@ -184,6 +194,7 @@ export class SceneEngine {
       w.bubble = "work";
     }
     w.slot = -1;
+    w.linger = -1;
     this.walkTo(w, DOOR_OUTSIDE, "leaving");
   }
 
@@ -194,6 +205,10 @@ export class SceneEngine {
   }
 
   private advance(w: Internal, dt: number) {
+    if (w.linger >= 0) {
+      w.linger -= dt;
+      if (w.linger < 0) this.leave(w);
+    }
     if (w.phase === "idle") {
       w.pause -= dt;
       if (w.pause <= 0) this.walkTo(w, this.pickWaypoint(w), "to-work");

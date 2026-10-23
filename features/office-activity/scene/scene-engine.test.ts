@@ -64,6 +64,20 @@ describe("수행 중", () => {
 
     expect(e.walkers).toEqual([]);
   });
+
+  test("짧게 끝난 호출도 바로 나가지 않고 3초쯤 더 돌아다니다 나간다", () => {
+    const e = engine();
+    e.sync([work("a")], true);
+    e.step(0.05);
+    e.sync([], true);
+
+    run(e, 2.5);
+    expect(walker(e, "a")).toMatchObject({ fading: false, bubble: "work" });
+    expect(walker(e, "a").y).toBeLessThan(DOOR.y);
+
+    run(e, 15);
+    expect(e.walkers).toEqual([]);
+  });
 });
 
 describe("허용 대기", () => {
