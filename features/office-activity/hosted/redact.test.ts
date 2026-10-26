@@ -106,3 +106,17 @@ describe("호스팅으로 보낼 상태", () => {
     expect(original.sessions.s1.characters[0]).toMatchObject({ label: "Bash · ls -la", toolInput: { command: "ls -la" } });
   });
 });
+
+describe("호스팅으로 보내지 않는 세션 정보", () => {
+  test("세션의 전체 경로와 탭에서 내린 세션은 보내지 않는다", () => {
+    const state = stateWith();
+    state.sessions.s1.cwd = "/home/me/private-client/side-project";
+    state.retired = { s0: { ...state.sessions.s1, id: "s0" } };
+
+    const redacted = redactState(state);
+
+    expect(redacted.sessions.s1).not.toHaveProperty("cwd");
+    expect(redacted).not.toHaveProperty("retired");
+    expect(state.sessions.s1.cwd).toBe("/home/me/private-client/side-project");
+  });
+});

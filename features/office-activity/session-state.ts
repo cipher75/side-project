@@ -10,6 +10,8 @@ type Payload = Record<string, unknown>;
 // 허용되거나 거절된 캐릭터가 퇴근 장면을 보여줄 시간. 판단이 아니라 화면 정리에만 쓴다.
 const ENDED_KEEP_MS = 8_000;
 const LABEL_MAX = 40;
+// 탭에서 내린 세션을 되살리려고 기억해 두는 최대 개수
+const RETIRED_MAX = 20;
 
 export function emptyOfficeState(): OfficeState {
   return { sessions: {}, order: [] };
@@ -24,11 +26,12 @@ export function applyHookEvent(
   if (!sessionId) return state;
 
   const eventName = text(payload.hook_event_name);
+  const revived = state.sessions[sessionId] ? undefined : state.retired?.[sessionId];
   let session = pruneEnded(
-    state.sessions[sessionId] ?? newSession(sessionId, payload, eventName),
+    state.sessions[sessionId] ?? revived ?? newSession(sessionId, payload, eventName),
     now
   );
-  session = withName(session, payload);
+  session = withCwd(withName(session, payload), payload);
   if (eventName && CARRIES_CALL_ID.has(eventName)) session = adoptOrphan(session, payload);
 
   switch (eventName) {
@@ -90,7 +93,8 @@ export function applyHookEvent(
   }
 
   session = { ...session, lit: isLit(session) };
-  const base = eventName === "OfficeConnect" ? retireReplaced(state, session) : state;
+  let base = revived ? withoutRetired(state, sessionId) : state;
+  if (eventName === "OfficeConnect") base = retireReplaced(base, session);
   return {
     ...base,
     sessions: { ...base.sessions, [sessionId]: session },
@@ -99,17 +103,35 @@ export function applyHookEvent(
 }
 
 // /clear는 같은 폴더에서 새 세션을 시작한다. 그때 스킬 hook이 먼저 사라져 이전 세션의 SessionEnd가
-// 오지 않으므로, 같은 폴더에서 새 세션이 연결되면 일하거나 허용을 기다리는 캐릭터가 없는 이전 세션을 정리한다.
-// 같은 폴더에서 세션 둘을 함께 쓰는 중이었다면, 정리된 세션도 다음 이벤트가 오면 다시 나타난다.
+// 오지 않으므로, 같은 전체 경로에서 새 세션이 연결되면 일하거나 허용을 기다리는 캐릭터가 없는 이전 세션을
+// 탭에서 내린다. 폴더 이름만 같은 다른 저장소의 세션은 건드리지 않는다. 같은 폴더에서 세션 둘을 함께 쓰는
+// 중이었다면, 내린 세션이 다음 이벤트를 보낼 때 그동안의 상태 그대로 되살린다.
 function retireReplaced(state: OfficeState, incoming: Session): OfficeState {
-  const retired = state.order.filter((id) => {
+  if (!incoming.cwd) return state;
+  const ids = state.order.filter((id) => {
     const other = state.sessions[id];
-    return id !== incoming.id && other?.name === incoming.name && !other.characters.some(isActive);
+    return id !== incoming.id && other?.cwd === incoming.cwd && !other.characters.some(isActive);
   });
-  if (!retired.length) return state;
+  if (!ids.length) return state;
   const sessions = { ...state.sessions };
-  for (const id of retired) delete sessions[id];
-  return { ...state, sessions, order: state.order.filter((id) => !retired.includes(id)) };
+  const retired = { ...state.retired };
+  for (const id of ids) {
+    retired[id] = sessions[id];
+    delete sessions[id];
+  }
+  const kept = Object.keys(retired).slice(-RETIRED_MAX);
+  return {
+    ...state,
+    sessions,
+    order: state.order.filter((id) => !ids.includes(id)),
+    retired: Object.fromEntries(kept.map((id) => [id, retired[id]])),
+  };
+}
+
+function withoutRetired(state: OfficeState, id: string): OfficeState {
+  const retired = { ...state.retired };
+  delete retired[id];
+  return { ...state, retired };
 }
 
 function isActive(c: Character): boolean {
@@ -144,6 +166,11 @@ function newSession(id: string, payload: Payload, eventName: string | undefined)
 function withName(session: Session, payload: Payload): Session {
   const name = sessionName(payload);
   return name && name !== session.name ? { ...session, name } : session;
+}
+
+function withCwd(session: Session, payload: Payload): Session {
+  const cwd = text(payload.cwd);
+  return cwd && cwd !== session.cwd ? { ...session, cwd } : session;
 }
 
 function sessionName(payload: Payload): string | undefined {

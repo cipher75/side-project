@@ -26,6 +26,8 @@ export type Character = {
 export type Session = {
   id: string;
   name: string;
+  // 세션을 연 폴더의 전체 경로. /clear로 같은 곳에서 시작한 새 세션을 알아보는 데만 쓰고, 호스팅으로는 보내지 않는다.
+  cwd?: string;
   connected: boolean;
   // 세션이 연결되어 있고, 아직 일이 없었거나 일하거나 기다리는 캐릭터가 있으면 사무실에 불이 켜진다.
   lit: boolean;
@@ -41,6 +43,8 @@ export type Session = {
 export type OfficeState = {
   sessions: Record<string, Session>;
   order: string[];
+  // 같은 폴더의 새 세션 때문에 탭에서 내린 세션. 실제로는 살아 있던 세션이 다시 이벤트를 보내면 그대로 되살린다.
+  retired?: Record<string, Session>;
   // 서버가 켜질 때마다 바뀌는 값. 화면은 이 값이 바뀌면 서버가 다시 켜진 것을 안다.
   instance?: string;
 };
