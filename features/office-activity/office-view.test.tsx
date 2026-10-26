@@ -29,17 +29,35 @@ beforeEach(() => {
 });
 
 describe("세션 탭", () => {
-  test("새 세션이 연결되면 그 탭을 바로 보여준다", () => {
+  const session = (id: string, name: string, promptedAt?: number) => ({
+    id, name, promptedAt, connected: true, lit: true, doneCount: 0, characters: [],
+  });
+  const three = (a: number, b: number, c: number): OfficeState => ({
+    ...empty("i1"),
+    sessions: { a: session("a", "blog", a), b: session("b", "shop", b), c: session("c", "api", c) },
+    order: ["a", "b", "c"],
+  });
+  const selected = () => screen.getAllByRole("tab").find((tab) => tab.getAttribute("aria-selected") === "true");
+
+  test("마지막으로 요청을 받은 세션의 탭을 보여준다", () => {
     render(<OfficeView />);
-    const session = (id: string, name: string) => ({
-      id, name, connected: true, lit: true, doneCount: 0, characters: [],
-    });
-    send({ ...empty("i1"), sessions: { a: session("a", "blog") }, order: ["a"] });
-    act(() => screen.getByRole("tab", { name: /blog/ }).click());
+    send(three(1, 3, 2));
+    expect(selected()).toHaveTextContent("shop");
 
-    send({ ...empty("i1"), sessions: { a: session("a", "blog"), b: session("b", "shop") }, order: ["a", "b"] });
+    send(three(4, 3, 2));
+    expect(selected()).toHaveTextContent("blog");
+  });
 
-    expect(screen.getByRole("tab", { name: /shop/ })).toHaveAttribute("aria-selected", "true");
+  test("새 요청이 오기 전까지는 사용자가 고른 탭을 그대로 둔다", () => {
+    render(<OfficeView />);
+    send(three(1, 3, 2));
+    act(() => screen.getByRole("tab", { name: /api/ }).click());
+
+    send({ ...three(1, 3, 2), sessions: { ...three(1, 3, 2).sessions, d: session("d", "web") }, order: ["a", "b", "c", "d"] });
+    expect(selected()).toHaveTextContent("api");
+
+    send(three(1, 5, 2));
+    expect(selected()).toHaveTextContent("shop");
   });
 });
 

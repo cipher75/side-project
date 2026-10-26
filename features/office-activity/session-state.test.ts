@@ -46,6 +46,20 @@ describe("연결", () => {
 
     expect(session(state)).toMatchObject({ name: "side-project", lit: true });
   });
+
+  test("연결과 프롬프트 입력은 요청 시각을 남기고, tool 호출은 남기지 않는다", () => {
+    const state = applyHookEvent(
+      applyHookEvent(
+        applyHookEvent(emptyOfficeState(), connect, 1_000),
+        { hook_event_name: "UserPromptSubmit", session_id: S },
+        2_000
+      ),
+      { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "t1", tool_name: "Read", tool_input: {} },
+      3_000
+    );
+
+    expect(session(state).promptedAt).toBe(2_000);
+  });
 });
 
 describe("수행 중", () => {

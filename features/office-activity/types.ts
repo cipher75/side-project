@@ -28,6 +28,8 @@ export type Session = {
   name: string;
   // 세션을 연 폴더의 전체 경로. /clear로 같은 곳에서 시작한 새 세션을 알아보는 데만 쓰고, 호스팅으로는 보내지 않는다.
   cwd?: string;
+  // 사용자가 이 세션에 마지막으로 요청을 시작한 시각(연결 포함). 화면은 이 값이 가장 최근인 세션의 탭을 보여준다.
+  promptedAt?: number;
   connected: boolean;
   // 세션이 연결되어 있고, 아직 일이 없었거나 일하거나 기다리는 캐릭터가 있으면 사무실에 불이 켜진다.
   lit: boolean;

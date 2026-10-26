@@ -36,7 +36,8 @@ export function applyHookEvent(
 
   switch (eventName) {
     case "OfficeConnect":
-      session = { ...session, connected: true };
+    case "UserPromptSubmit":
+      session = { ...session, connected: true, promptedAt: now };
       break;
     case "PreToolUse":
       if (!session.characters.some((c) => c.id === text(payload.tool_use_id))) {

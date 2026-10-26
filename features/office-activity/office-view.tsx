@@ -49,14 +49,16 @@ export function OfficeBoard({
   staleSessions = {},
 }: OfficeBoardProps) {
   const [picked, setPicked] = useState<string | null>(null);
-  // 새 세션이 연결되면 그 탭을 바로 보여준다. 고른 탭이 사라지면 가장 최근 세션을 보여준다.
-  const [seen, setSeen] = useState<string[]>([]);
-  if (state.order.join() !== seen.join()) {
-    const fresh = state.order.filter((id) => !seen.includes(id));
-    setSeen(state.order);
-    if (fresh.length) setPicked(fresh[fresh.length - 1]);
+  // 어느 세션이든 새 요청이 시작되면(연결 포함) 그 세션의 탭으로 넘어간다. 요청을 처리하는 동안의 tool 호출이나
+  // 서버가 다시 켜져 세션이 다시 생기는 것으로는 넘어가지 않는다. 그 사이에는 사용자가 고른 탭을 그대로 둔다.
+  const latest = latestPrompted(state);
+  const latestKey = latest ? `${latest.id}@${latest.promptedAt}` : "";
+  const [followed, setFollowed] = useState("");
+  if (latest && latestKey !== followed) {
+    setFollowed(latestKey);
+    setPicked(latest.id);
   }
-  const selectedId = picked && state.sessions[picked] ? picked : state.order[state.order.length - 1];
+  const selectedId = picked && state.sessions[picked] ? picked : (latest?.id ?? state.order[state.order.length - 1]);
   const session = selectedId ? state.sessions[selectedId] : undefined;
   const selectedStale = selectedId ? staleSessions[selectedId] : undefined;
 
@@ -91,12 +93,13 @@ export function OfficeBoard({
 
       {state.order.length > 0 ? (
         <Tabs value={selectedId} onValueChange={(value) => setPicked(String(value))}>
-          <TabsList className="h-auto flex-wrap justify-start">
+          {/* 탭마다 떨어진 카드로 보여준다. 선택한 탭은 테두리를 두 겹으로 굵게 해, 키보드 포커스 ring과 겹치지 않게 한다. */}
+          <TabsList className="h-auto flex-wrap justify-start gap-2 bg-transparent p-0">
             {state.order.map((id) => (
               <TabsTrigger
                 key={id}
                 value={id}
-                className="flex-none data-active:font-semibold data-active:shadow-sm data-active:ring-2 data-active:ring-primary dark:data-active:ring-primary"
+                className="flex-none rounded-lg border-border! bg-card px-3 py-1.5 shadow-xs data-active:border-primary! data-active:font-semibold data-active:shadow-sm data-active:inset-ring data-active:inset-ring-primary"
               >
                 <StatusDot session={state.sessions[id]} />
                 {state.sessions[id].name}
@@ -208,6 +211,15 @@ function SessionBadges({ session }: { session: Session }) {
       <Badge variant="secondary">오늘 완료 {session.doneCount}</Badge>
     </div>
   );
+}
+
+function latestPrompted(state: OfficeState): Session | undefined {
+  let latest: Session | undefined;
+  for (const id of state.order) {
+    const session = state.sessions[id];
+    if (session?.promptedAt !== undefined && session.promptedAt > (latest?.promptedAt ?? -Infinity)) latest = session;
+  }
+  return latest;
 }
 
 function statusText(session: Session): string {
