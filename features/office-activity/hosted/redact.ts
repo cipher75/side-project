@@ -11,9 +11,14 @@ const FILE_TOOLS = new Set(["Read", "Edit", "Write", "MultiEdit", "NotebookEdit"
 export function redactState(state: OfficeState): OfficeState {
   const sessions: Record<string, Session> = {};
   for (const [id, session] of Object.entries(state.sessions)) {
-    sessions[id] = { ...session, characters: session.characters.map(redactCharacter) };
+    const redacted: Session = { ...session, characters: session.characters.map(redactCharacter) };
+    delete redacted.cwd;
+    sessions[id] = redacted;
   }
-  return { ...state, sessions };
+  // 탭에서 내린 세션은 로컬에서 되살리는 데만 쓴다.
+  const redacted: OfficeState = { ...state, sessions };
+  delete redacted.retired;
+  return redacted;
 }
 
 function redactCharacter(character: Character): Character {
