@@ -234,7 +234,7 @@ function LegendSprite({ kind, label }: { kind: CharacterKind; label: string }) {
       <canvas
         width={SPRITE_WIDTH}
         height={SPRITE_HEIGHT}
-        className="h-[34px] w-6 [image-rendering:pixelated]"
+        className="h-9 w-8 [image-rendering:pixelated]"
         ref={(canvas) => {
           const context = canvas?.getContext("2d");
           if (context) drawSprite(context, { kind, look: lookFor(label), expr: "happy", frame: 0, moving: false });

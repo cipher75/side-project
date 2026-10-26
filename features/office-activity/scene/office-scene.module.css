@@ -55,8 +55,8 @@
   position: absolute;
   left: calc(var(--x) * var(--p));
   top: calc(var(--y) * var(--p));
-  width: calc(24 * var(--p));
-  height: calc(34 * var(--p));
+  width: calc(28 * var(--p));
+  height: calc(31.5 * var(--p));
   transform: translate(-50%, -100%);
   transition: opacity 0.35s;
 }
@@ -85,7 +85,7 @@
 .bubble {
   position: absolute;
   left: calc(var(--x) * var(--p));
-  top: calc((var(--y) - 35) * var(--p));
+  top: calc((var(--y) - 33) * var(--p));
   display: flex;
   align-items: center;
   gap: 5px;
@@ -179,9 +179,6 @@
 }
 
 .night {
-  position: absolute;
-  inset: 0;
-  background: rgba(6, 9, 40, 0.72);
   opacity: 0;
   transition: opacity 1s;
   pointer-events: none;

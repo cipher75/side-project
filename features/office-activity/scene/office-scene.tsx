@@ -5,8 +5,8 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import { cn } from "cn";
 
 import { SceneEngine, type SceneCharacter, type Walker } from "./scene-engine";
-import { drawOffice } from "./office-background";
-import { SCENE_HEIGHT, SCENE_WIDTH } from "./layout";
+import { BG_HEIGHT, BG_WIDTH, drawOffice } from "./office-background";
+import { brightnessAt } from "./lighting";
 import styles from "./office-scene.module.css";
 import { KIND_STYLE, SPRITE_HEIGHT, SPRITE_WIDTH, drawSprite, lookFor } from "./sprite";
 
@@ -24,10 +24,14 @@ export function OfficeScene({ characters, lit, hadWork, connected, alert }: Offi
   const [engine] = useState(() => new SceneEngine());
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   const bgRef = useRef<HTMLCanvasElement>(null);
+  const nightRef = useRef<HTMLCanvasElement>(null);
 
+  // 노을 무렵과 불 꺼진 밤을 한 번씩 그려 두고, 불이 꺼지면 밤 그림이 서서히 드러난다.
   useEffect(() => {
-    const context = bgRef.current?.getContext("2d");
-    if (context) drawOffice(context);
+    const day = bgRef.current?.getContext("2d");
+    const night = nightRef.current?.getContext("2d");
+    if (day) drawOffice(day, "sunset");
+    if (night) drawOffice(night, "night");
   }, []);
 
   useEffect(() => {
@@ -64,7 +68,8 @@ export function OfficeScene({ characters, lit, hadWork, connected, alert }: Offi
       role="img"
       aria-label="사무실 장면"
     >
-      <canvas ref={bgRef} className={styles.bg} width={SCENE_WIDTH} height={SCENE_HEIGHT} />
+      <canvas ref={bgRef} className={styles.bg} width={BG_WIDTH} height={BG_HEIGHT} />
+      <canvas ref={nightRef} className={cn(styles.bg, styles.night)} width={BG_WIDTH} height={BG_HEIGHT} />
       <div className={styles.layer}>
         <div className={cn(styles.sign, styles.signRoom)} style={{ left: "calc(263 * var(--p))", top: "calc(53 * var(--p))" }}>
           허용 대기 회의실
@@ -78,7 +83,6 @@ export function OfficeScene({ characters, lit, hadWork, connected, alert }: Offi
           <WalkerSprite key={w.id} walker={w} />
         ))}
       </div>
-      <div className={styles.night} />
       <div className={styles.layer}>
         {walkers.map((w) => (
           <WalkerBubble key={w.id} walker={w} />
@@ -115,7 +119,8 @@ function WalkerSprite({ walker }: { walker: Walker }) {
         ref={ref}
         width={SPRITE_WIDTH}
         height={SPRITE_HEIGHT}
-        style={{ transform: `scaleX(${walker.flip})` }}
+        // 캐릭터도 서 있는 자리의 빛을 받는다.
+        style={{ transform: `scaleX(${walker.flip})`, filter: `brightness(${brightnessAt(walker.x, walker.y)}) saturate(1.1)` }}
       />
     </div>
   );

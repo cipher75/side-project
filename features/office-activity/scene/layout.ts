@@ -8,6 +8,14 @@ export type Point = { x: number; y: number };
 export const DOOR: Point = { x: 64, y: 176 };
 export const DOOR_OUTSIDE: Point = { x: 64, y: 180 };
 
+// 책상 네 개의 왼쪽 위 모서리. 배경과 조명이 함께 쓴다.
+export const DESKS: Point[] = [
+  { x: 28, y: 64 },
+  { x: 88, y: 64 },
+  { x: 28, y: 112 },
+  { x: 88, y: 112 },
+];
+
 // 일하는 캐릭터가 돌아다니는 지점들.
 export const WAYPOINTS: Point[] = [
   { x: 52, y: 94 },
