@@ -109,7 +109,7 @@ describe("수행 중", () => {
     ]);
   });
 
-  test("호출이 끝나면 캐릭터가 사라지고 한 번 일이 있었던 세션은 불이 꺼진다", () => {
+  test("호출이 끝나면 캐릭터가 사라지고, 한 번 일이 있었던 세션은 턴이 끝날 때 불이 꺼진다", () => {
     const state = apply(
       emptyOfficeState(),
       connect,
@@ -123,7 +123,9 @@ describe("수행 중", () => {
       { hook_event_name: "PostToolUse", session_id: S, tool_use_id: "t1", tool_name: "Read" }
     );
 
-    expect(session(state)).toMatchObject({ characters: [], doneCount: 1, lit: false });
+    expect(session(state)).toMatchObject({ characters: [], doneCount: 1, lit: true });
+    const ended = applyHookEvent(state, { hook_event_name: "Stop", session_id: S }, 2_000);
+    expect(session(ended).lit).toBe(false);
   });
 
   test("불이 꺼진 뒤 새 호출이 시작되면 다시 켜진다", () => {
@@ -428,9 +430,10 @@ describe("허용과 거절", () => {
     expect(session(state).doneCount).toBe(2);
   });
 
-  test("허용되거나 거절된 캐릭터는 불을 켜 두지 않고, 퇴근 장면 시간이 지나면 정리된다", () => {
+  test("허용되거나 거절된 캐릭터는 끝난 일로 세고, 퇴근 장면 시간이 지나면 정리된다", () => {
     let state = waiting(post("t1"), result("t2"));
-    expect(session(state)).toMatchObject({ lit: false, doneCount: 2 });
+    expect(session(state).doneCount).toBe(2);
+    expect(session(state).characters.some((c) => c.status === "working" || c.status === "waiting")).toBe(false);
 
     state = applyHookEvent(state, { hook_event_name: "Notification", session_id: S }, 60_000);
     expect(session(state).characters).toEqual([]);
@@ -526,6 +529,32 @@ describe("서버가 세션의 시작을 보지 못했을 때", () => {
     const state = applyHookEvent({ ...emptyOfficeState(), instance: "server-1" }, connect, 1_000);
 
     expect(state.instance).toBe("server-1");
+  });
+});
+
+describe("턴 진행 중", () => {
+  const read = (id: string) => ({ hook_event_name: "PreToolUse", session_id: S, tool_use_id: id, tool_name: "Read", tool_input: {} });
+  const done = (id: string) => ({ hook_event_name: "PostToolUse", session_id: S, tool_use_id: id, tool_name: "Read", tool_input: {} });
+
+  test("도구 호출 사이에 Claude가 생각하는 동안에도 불이 켜져 있다", () => {
+    const state = apply(emptyOfficeState(), connect, { hook_event_name: "UserPromptSubmit", session_id: S }, read("t1"), done("t1"));
+
+    expect(session(state)).toMatchObject({ characters: [], doneCount: 1, inTurn: true, lit: true });
+  });
+
+  test("턴 시작을 놓쳐도 도구 호출을 보면 턴 중으로 안다", () => {
+    const state = apply(emptyOfficeState(), connect, read("t1"), done("t1"));
+
+    expect(session(state)).toMatchObject({ inTurn: true, lit: true });
+  });
+
+  test("Stop이 오면 턴이 끝나 불이 꺼진다", () => {
+    const state = apply(emptyOfficeState(), connect, { hook_event_name: "UserPromptSubmit", session_id: S }, read("t1"), done("t1"), {
+      hook_event_name: "Stop",
+      session_id: S,
+    });
+
+    expect(session(state)).toMatchObject({ inTurn: false, lit: false });
   });
 });
 
