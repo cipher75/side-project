@@ -10,6 +10,8 @@ type Payload = Record<string, unknown>;
 // 허용되거나 거절된 캐릭터가 퇴근 장면을 보여줄 시간. 판단이 아니라 화면 정리에만 쓴다.
 const ENDED_KEEP_MS = 8_000;
 const LABEL_MAX = 40;
+// 탭에서 내린 세션을 되살리려고 기억해 두는 최대 개수
+const RETIRED_MAX = 20;
 
 export function emptyOfficeState(): OfficeState {
   return { sessions: {}, order: [] };
@@ -24,11 +26,12 @@ export function applyHookEvent(
   if (!sessionId) return state;
 
   const eventName = text(payload.hook_event_name);
+  const revived = state.sessions[sessionId] ? undefined : state.retired?.[sessionId];
   let session = pruneEnded(
-    state.sessions[sessionId] ?? newSession(sessionId, payload, eventName),
+    state.sessions[sessionId] ?? revived ?? newSession(sessionId, payload, eventName),
     now
   );
-  session = withName(session, payload);
+  session = withCwd(withName(session, payload), payload);
   if (eventName && CARRIES_CALL_ID.has(eventName)) session = adoptOrphan(session, payload);
 
   switch (eventName) {
@@ -90,11 +93,49 @@ export function applyHookEvent(
   }
 
   session = { ...session, lit: isLit(session) };
+  let base = revived ? withoutRetired(state, sessionId) : state;
+  if (eventName === "OfficeConnect") base = retireReplaced(base, session);
+  return {
+    ...base,
+    sessions: { ...base.sessions, [sessionId]: session },
+    order: base.order.includes(sessionId) ? base.order : [...base.order, sessionId],
+  };
+}
+
+// /clear는 같은 폴더에서 새 세션을 시작한다. 그때 스킬 hook이 먼저 사라져 이전 세션의 SessionEnd가
+// 오지 않으므로, 같은 전체 경로에서 새 세션이 연결되면 일하거나 허용을 기다리는 캐릭터가 없는 이전 세션을
+// 탭에서 내린다. 폴더 이름만 같은 다른 저장소의 세션은 건드리지 않는다. 같은 폴더에서 세션 둘을 함께 쓰는
+// 중이었다면, 내린 세션이 다음 이벤트를 보낼 때 그동안의 상태 그대로 되살린다.
+function retireReplaced(state: OfficeState, incoming: Session): OfficeState {
+  if (!incoming.cwd) return state;
+  const ids = state.order.filter((id) => {
+    const other = state.sessions[id];
+    return id !== incoming.id && other?.cwd === incoming.cwd && !other.characters.some(isActive);
+  });
+  if (!ids.length) return state;
+  const sessions = { ...state.sessions };
+  const retired = { ...state.retired };
+  for (const id of ids) {
+    retired[id] = sessions[id];
+    delete sessions[id];
+  }
+  const kept = Object.keys(retired).slice(-RETIRED_MAX);
   return {
     ...state,
-    sessions: { ...state.sessions, [sessionId]: session },
-    order: state.order.includes(sessionId) ? state.order : [...state.order, sessionId],
+    sessions,
+    order: state.order.filter((id) => !ids.includes(id)),
+    retired: Object.fromEntries(kept.map((id) => [id, retired[id]])),
   };
+}
+
+function withoutRetired(state: OfficeState, id: string): OfficeState {
+  const retired = { ...state.retired };
+  delete retired[id];
+  return { ...state, retired };
+}
+
+function isActive(c: Character): boolean {
+  return c.status === "working" || c.status === "waiting";
 }
 
 // 이벤트가 오지 않아도 퇴근 장면이 끝난 캐릭터를 정리한다.
@@ -127,6 +168,11 @@ function withName(session: Session, payload: Payload): Session {
   return name && name !== session.name ? { ...session, name } : session;
 }
 
+function withCwd(session: Session, payload: Payload): Session {
+  const cwd = text(payload.cwd);
+  return cwd && cwd !== session.cwd ? { ...session, cwd } : session;
+}
+
 function sessionName(payload: Payload): string | undefined {
   return text(payload.project) ?? lastSegment(text(payload.cwd));
 }
@@ -134,7 +180,7 @@ function sessionName(payload: Payload): string | undefined {
 // 퇴근 중인(approved, denied, cancelled) 캐릭터는 불을 켜 두지 않는다. 화면은 그 캐릭터가 문을 나갈 때까지 불을 유지한다.
 // 그전 상태를 모르는 세션은 남은 허용 대기가 있을 수 있으므로 "모두 끝남"을 뜻하는 불 꺼짐을 보이지 않는다.
 function isLit(session: Session): boolean {
-  const active = session.characters.some((c) => c.status === "working" || c.status === "waiting");
+  const active = session.characters.some(isActive);
   return session.connected && (active || session.doneCount === 0 || session.priorUnknown === true);
 }
 

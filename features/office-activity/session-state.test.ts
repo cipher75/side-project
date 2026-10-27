@@ -563,6 +563,71 @@ describe("세션 마무리", () => {
     expect(state.order).toEqual([S, "session-2"]);
   });
 
+  const HERE = "/work/a/side-project";
+  const connectAt = (id: string, cwd?: string) => ({
+    hook_event_name: "OfficeConnect", session_id: id, project: "side-project", ...(cwd ? { cwd } : {}),
+  });
+  const finishedOne = [
+    { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "t1", tool_name: "Read", tool_input: {} },
+    { hook_event_name: "Stop", session_id: S },
+  ];
+
+  test("/clear로 같은 경로에 새 세션이 연결되면 일이 없는 이전 세션 탭을 내린다", () => {
+    const state = apply(emptyOfficeState(), connectAt(S, HERE), ...finishedOne, connectAt("session-2", HERE));
+
+    expect(state.order).toEqual(["session-2"]);
+    expect(state.sessions[S]).toBeUndefined();
+  });
+
+  test("이전 세션의 경로를 연결 신호가 아닌 hook 이벤트의 cwd로 알아도 내린다", () => {
+    const state = apply(
+      emptyOfficeState(),
+      connectAt(S),
+      { hook_event_name: "Stop", session_id: S, cwd: HERE },
+      connectAt("session-2", HERE)
+    );
+
+    expect(state.order).toEqual(["session-2"]);
+  });
+
+  test("폴더 이름만 같은 다른 저장소의 세션은 내리지 않는다", () => {
+    const state = apply(emptyOfficeState(), connectAt(S, HERE), ...finishedOne, connectAt("session-2", "/work/b/side-project"));
+
+    expect(state.order).toEqual([S, "session-2"]);
+  });
+
+  test("경로가 없는 연결 신호로는 아무 세션도 내리지 않는다", () => {
+    const state = apply(emptyOfficeState(), connectAt(S, HERE), ...finishedOne, connectAt("session-2"));
+
+    expect(state.order).toEqual([S, "session-2"]);
+  });
+
+  test("이전 세션에 허용을 기다리거나 일하는 캐릭터가 있으면 내리지 않는다", () => {
+    const state = apply(
+      emptyOfficeState(),
+      connectAt(S, HERE),
+      { hook_event_name: "PreToolUse", session_id: S, tool_use_id: "t1", tool_name: "Bash", tool_input: { command: "x" } },
+      { hook_event_name: "PermissionRequest", session_id: S, tool_name: "Bash", tool_input: { command: "x" } },
+      connectAt("session-2", HERE)
+    );
+
+    expect(state.order).toEqual([S, "session-2"]);
+  });
+
+  test("내린 세션이 살아 있어 다시 이벤트를 보내면 그동안의 상태 그대로 되살린다", () => {
+    const state = apply(
+      emptyOfficeState(),
+      connectAt(S, HERE),
+      ...finishedOne,
+      connectAt("session-2", HERE),
+      { hook_event_name: "Stop", session_id: S }
+    );
+
+    expect(state.order).toEqual(["session-2", S]);
+    expect(session(state)).toMatchObject({ connected: true, priorUnknown: false, doneCount: 1 });
+    expect(state.retired?.[S]).toBeUndefined();
+  });
+
   test("session_id가 없는 이벤트는 무시한다", () => {
     const state = apply(emptyOfficeState(), { hook_event_name: "PreToolUse" });
 

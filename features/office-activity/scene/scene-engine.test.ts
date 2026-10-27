@@ -64,6 +64,20 @@ describe("수행 중", () => {
 
     expect(e.walkers).toEqual([]);
   });
+
+  test("짧게 끝난 호출도 바로 나가지 않고 3초쯤 더 돌아다니다 나간다", () => {
+    const e = engine();
+    e.sync([work("a")], true);
+    e.step(0.05);
+    e.sync([], true);
+
+    run(e, 2.5);
+    expect(walker(e, "a")).toMatchObject({ fading: false, bubble: "work" });
+    expect(walker(e, "a").y).toBeLessThan(DOOR.y);
+
+    run(e, 15);
+    expect(e.walkers).toEqual([]);
+  });
 });
 
 describe("허용 대기", () => {
@@ -224,11 +238,14 @@ describe("사무실 불", () => {
 });
 
 describe("일을 마친 직원의 결재", () => {
-  test("목록에서 빠진 직원은 보스 책상 옆 결재 자리에 잠시 섰다가 출입문으로 나간다", () => {
+  test("목록에서 빠진 직원은 3초쯤 더 돌아다닌 뒤 보스 책상 옆 결재 자리에 잠시 섰다가 출입문으로 나간다", () => {
     const e = engine();
     e.sync([work("a")], true);
     run(e, 6);
     e.sync([], true);
+    run(e, 2.5);
+    expect(walker(e, "a").bubble).toBe("work");
+    run(e, 1);
     expect(walker(e, "a").bubble).toBe("done");
 
     let reported = false;

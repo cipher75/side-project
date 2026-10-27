@@ -49,7 +49,14 @@ export function OfficeBoard({
   staleSessions = {},
 }: OfficeBoardProps) {
   const [picked, setPicked] = useState<string | null>(null);
-  const selectedId = picked && state.sessions[picked] ? picked : state.order[0];
+  // 새 세션이 연결되면 그 탭을 바로 보여준다. 고른 탭이 사라지면 가장 최근 세션을 보여준다.
+  const [seen, setSeen] = useState<string[]>([]);
+  if (state.order.join() !== seen.join()) {
+    const fresh = state.order.filter((id) => !seen.includes(id));
+    setSeen(state.order);
+    if (fresh.length) setPicked(fresh[fresh.length - 1]);
+  }
+  const selectedId = picked && state.sessions[picked] ? picked : state.order[state.order.length - 1];
   const session = selectedId ? state.sessions[selectedId] : undefined;
   const selectedStale = selectedId ? staleSessions[selectedId] : undefined;
 
@@ -88,7 +95,11 @@ export function OfficeBoard({
               높이를 갖게 하고, 좁은 화면에서는 한 줄로 두고 옆으로 밀어 본다. */}
           <TabsList className="w-full justify-start rounded-2xl group-data-horizontal/tabs:h-auto max-sm:overflow-x-auto sm:w-fit sm:flex-wrap">
             {state.order.map((id) => (
-              <TabsTrigger key={id} value={id} className="h-8 flex-none">
+              <TabsTrigger
+                key={id}
+                value={id}
+                className="h-8 flex-none data-active:font-semibold data-active:shadow-sm data-active:ring-2 data-active:ring-primary dark:data-active:ring-primary"
+              >
                 <StatusDot session={state.sessions[id]} />
                 {state.sessions[id].name}
                 <span className="text-xs font-normal text-muted-foreground">

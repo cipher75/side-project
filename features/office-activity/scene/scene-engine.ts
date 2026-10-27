@@ -62,6 +62,8 @@ type Internal = Walker &
     slot: number;
     spot: number;
     fadeTime: number;
+    // 일을 마친 뒤 사무실을 더 돌아다닐 남은 시간(초). 음수면 아직 일하는 중이다.
+    linger: number;
   };
 
 type BossState = Boss & Mover & { phase: "seated" | "leaving" | "gone"; fadeTime: number };
@@ -73,6 +75,8 @@ const GLAD_PAUSE = 1.2;
 const STOP_PAUSE = 1.2;
 const REPORT_PAUSE = 1.4;
 const FRAME_TIME = 0.17;
+// 일을 마친 캐릭터가 바로 나가지 않고 더 돌아다니는 시간. 짧은 호출도 화면에서 볼 수 있게 한다.
+const LINGER = 3;
 
 export class SceneEngine {
   private items: Internal[] = [];
@@ -120,7 +124,10 @@ export class SceneEngine {
     for (const character of characters) {
       if (this.departed.has(character.id)) continue;
       const walker = this.items.find((w) => w.id === character.id);
-      if (walker) this.update(walker, character);
+      if (walker) {
+        walker.linger = -1;
+        this.update(walker, character);
+      }
       else this.spawn(character, placed);
     }
     for (const walker of this.items) {
@@ -199,6 +206,7 @@ export class SceneEngine {
       spot: -1,
       frameTime: 0,
       fadeTime: 0,
+      linger: -1,
     };
     this.items.push(walker);
     this.update(walker, character, true);
@@ -221,10 +229,11 @@ export class SceneEngine {
     else if (c.status === "working" && (isNew || w.phase === "to-wait" || w.phase === "waiting")) this.goWork(w);
   }
 
-  // 서버 목록에서 빠진 캐릭터. 일하다 끝난 직원은 보스에게 결재를 받고 나가고,
+  // 서버 목록에서 빠진 캐릭터. 일하다 끝난 직원은 3초쯤 더 돌아다닌 뒤 보스에게 결재를 받고 나가고,
   // 허용 여부를 모른 채 빠진 허용 대기 캐릭터는 ?만 지우고 바로 나간다.
   private finish(w: Internal) {
-    if (w.phase === "to-work" || w.phase === "idle") this.goReport(w);
+    if (w.linger >= 0) return;
+    if (w.phase === "to-work" || w.phase === "idle") w.linger = LINGER;
     else if (w.phase === "to-wait" || w.phase === "waiting") this.leave(w);
   }
 
@@ -247,6 +256,7 @@ export class SceneEngine {
     w.expr = "happy";
     if (w.bubble !== "glad") w.bubble = "done";
     w.slot = -1;
+    w.linger = -1;
     w.spot = this.freeSpot(w);
     this.walkTo(w, REPORT_SPOTS[w.spot], "to-report");
   }
@@ -283,6 +293,7 @@ export class SceneEngine {
     }
     w.slot = -1;
     w.spot = -1;
+    w.linger = -1;
     this.walkTo(w, DOOR_OUTSIDE, "leaving");
   }
 
@@ -294,6 +305,10 @@ export class SceneEngine {
   }
 
   private advance(w: Internal, dt: number) {
+    if (w.linger >= 0) {
+      w.linger -= dt;
+      if (w.linger < 0) this.goReport(w);
+    }
     if (w.phase === "idle") {
       w.pause -= dt;
       if (w.pause <= 0) this.walkTo(w, this.pickWaypoint(w), "to-work");
