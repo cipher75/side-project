@@ -27,7 +27,10 @@ function setupFor(mode: LightMode): LightSetup {
     lamps.push({ at: { x: 10, y: 22 }, radius: 44, color: [0.6, 0.48, 0.24] });
     // 허용 대기 회의실은 늘 환하게 켜 두어 눈에 띄게 한다.
     lamps.push({ at: { x: 263, y: 100 }, radius: 64, color: [0.42, 0.46, 0.55] });
-    lamps.push({ at: { x: 175, y: 100 }, radius: 12, color: [0.08, 0.28, 0.45] });
+    lamps.push({ at: { x: 205, y: 64 }, radius: 12, color: [0.08, 0.28, 0.45] });
+    // 보스 책상의 초록 은행원 스탠드와 책상 둘레의 따뜻한 빛
+    lamps.push({ at: { x: 157, y: 90 }, radius: 26, color: [0.42, 0.5, 0.22] });
+    lamps.push({ at: { x: 181, y: 92 }, radius: 30, color: [0.22, 0.18, 0.1] });
     lamps.push({ at: { x: 170, y: 141 }, radius: 7, color: [0.08, 0.4, 0.1] });
     lamps.push({ at: { x: 64, y: 166 }, radius: 16, color: [0.45, 0.12, 0.08] });
     return { ambient: [0.6, 0.52, 0.7], lamps };

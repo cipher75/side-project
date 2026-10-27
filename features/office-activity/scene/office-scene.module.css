@@ -61,6 +61,12 @@
   transition: opacity 0.35s;
 }
 
+/* 보스는 직원보다 조금 크다(64 x 72 도트를 32 x 36칸에). */
+.boss {
+  width: calc(32 * var(--p));
+  height: calc(36 * var(--p));
+}
+
 .char canvas {
   display: block;
   width: 100%;
@@ -170,6 +176,11 @@
 
 .stop {
   background: #e6e8ee;
+}
+
+.think {
+  background: #eef0ff;
+  letter-spacing: 0.1em;
 }
 
 @container (max-width: 480px) {
