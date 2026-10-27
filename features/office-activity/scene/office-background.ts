@@ -1,19 +1,19 @@
-import { DESKS, SCENE_HEIGHT, SCENE_WIDTH } from "./layout";
+import { BOSS_DESK, BOSS_SEAT, DESKS, SCENE_HEIGHT, SCENE_WIDTH } from "./layout";
 import { BULB_COLORS, applyLight, type LightMode } from "./lighting";
 import { mix, ramp, rng } from "./palette";
 
 // 320 x 180 논리 좌표의 사무실을 2배 도트(640 x 360)로 그린다.
-// 책상 네 개, 화이트보드, 책장, 정수기, 복사기, 허용 대기 회의실, 출입문 배치는 layout.ts의 좌표와 맞춘다.
+// 책상 네 개, 보스 책상, 화이트보드, 책장, 정수기, 복사기, 허용 대기 회의실, 출입문 배치는 layout.ts의 좌표와 맞춘다.
 export const BG_SCALE = 2;
+export const BG_WIDTH = SCENE_WIDTH * BG_SCALE;
+export const BG_HEIGHT = SCENE_HEIGHT * BG_SCALE;
 const OUTLINE = "#3a2a26";
 
 type Ramp = string[];
 
-export function drawOffice(c: CanvasRenderingContext2D, mode: LightMode) {
+// 논리 좌표로 그리는 도구 묶음. rect는 논리 좌표, dev는 실제 도트 좌표다.
+function pen(c: CanvasRenderingContext2D) {
   const d = BG_SCALE;
-  const night = mode === "night";
-  const rnd = rng(11);
-  // rect는 논리 좌표, dev는 실제 도트 좌표.
   const rect = (x: number, y: number, w: number, h: number, color: string) => {
     c.fillStyle = color;
     c.fillRect(Math.round(x * d), Math.round(y * d), Math.max(1, Math.round(w * d)), Math.max(1, Math.round(h * d)));
@@ -50,6 +50,14 @@ export function drawOffice(c: CanvasRenderingContext2D, mode: LightMode) {
     pts.forEach(([x, y], i) => (i ? c.lineTo(x * d, y * d) : c.moveTo(x * d, y * d)));
     c.fill();
   };
+  return { rect, dev, box, ellipse, polygon };
+}
+
+export function drawOffice(c: CanvasRenderingContext2D, mode: LightMode) {
+  const d = BG_SCALE;
+  const night = mode === "night";
+  const rnd = rng(11);
+  const { rect, dev, box, ellipse, polygon } = pen(c);
 
   const wall = ramp(158, 0.34, 0.8);
   const woodL = ramp(32, 0.5, 0.6);
@@ -257,20 +265,21 @@ export function drawOffice(c: CanvasRenderingContext2D, mode: LightMode) {
   drawMeetingRoom(rect, dev, box, ellipse, rnd, night, { wood, metal, plant, pot });
   drawDesks(rect, dev, box, ellipse, polygon, night, { wood, woodL, plant, pot });
 
-  // 몬스테라
-  box(198, 70, 12, 8, pot);
-  rect(198, 73, 12, 1, pot[0]);
-  for (const [lx, ly, rx, ry, t] of [[199, 63, 5, 4, 2], [209, 64, 5, 4, 2], [204, 59, 6, 5, 3], [204, 53, 4, 4, 3], [200, 56, 3, 3, 1]]) {
+  // 몬스테라(보스 자리 왼쪽 위)
+  box(154, 70, 12, 8, pot);
+  rect(154, 73, 12, 1, pot[0]);
+  for (const [lx, ly, rx, ry, t] of [[155, 63, 5, 4, 2], [165, 64, 5, 4, 2], [160, 59, 6, 5, 3], [160, 53, 4, 4, 3], [156, 56, 3, 3, 1]]) {
     ellipse(lx, ly, rx, ry, plant[t], OUTLINE);
     rect(lx - rx * 0.4, ly, rx * 0.8, 1 / d, plant[t + 1]);
   }
-  // 정수기
-  box(168, 104, 14, 14, metal);
-  rect(170, 108, 3, 2, "#e85d5d");
-  rect(177, 108, 3, 2, "#4a7ad6");
-  rect(169, 114, 12, 3, metal[1]);
-  box(170, 94, 10, 10, ramp(200, 0.75, 0.66));
-  rect(172, 95, 2, 7, "#d9f3ff");
+  // 정수기(보스 자리 오른쪽 위)
+  box(198, 64, 14, 14, metal);
+  rect(200, 68, 3, 2, "#e85d5d");
+  rect(207, 68, 3, 2, "#4a7ad6");
+  rect(199, 74, 12, 3, metal[1]);
+  box(200, 54, 10, 10, ramp(200, 0.75, 0.66));
+  rect(202, 55, 2, 7, "#d9f3ff");
+  drawBossChairAndTop(rect, dev, box, ellipse);
   // 복사기
   box(150, 130, 26, 18, ramp(215, 0.1, 0.78));
   rect(152, 132, 22, 5, "#4b5563");
@@ -298,6 +307,78 @@ export function drawOffice(c: CanvasRenderingContext2D, mode: LightMode) {
   rect(132.5, 153, 1, 1 / d, OUTLINE);
   ellipse(143, 155.5, 2.6, 1, cat[1], OUTLINE);
 
+  applyLight(c, d, mode);
+}
+
+const WALNUT = ramp(20, 0.5, 0.34);
+const WALNUT_LIGHT = ramp(24, 0.5, 0.46);
+const LEATHER = ramp(350, 0.55, 0.36);
+const GOLD = ramp(45, 0.85, 0.55);
+
+// 보스의 가죽 의자 등받이와 책상 상판. 보스보다 뒤에 있으므로 배경에 그린다.
+function drawBossChairAndTop(rect: Rect, dev: Rect, box: Box, ellipse: Ellipse) {
+  const d = BG_SCALE;
+  const { x: bx } = BOSS_SEAT;
+  ellipse(bx, 84, 14, 15.5, LEATHER[1], OUTLINE);
+  ellipse(bx - 1.5, 82, 12, 13.5, LEATHER[2]);
+  ellipse(bx - 4, 77, 6, 6, LEATHER[3]);
+  for (const [ox, y] of [[-6, 76], [0, 74], [6, 76], [-7, 84], [0, 82], [7, 84]]) rect(bx + ox, y, 1, 1, GOLD[3]);
+  const { x, top, panel, w } = BOSS_DESK;
+  box(x, top, w, panel - top, WALNUT_LIGHT);
+  rect(x, top, w, 1, WALNUT_LIGHT[4]);
+  for (let i = 0; i < 5; i++) dev(Math.round((x + 3 + i * 11) * d), Math.round((top + 2 + (i % 3)) * d), 14, 1, WALNUT_LIGHT[1]);
+  rect(bx - 12, top + 2, 24, 4, "#2f5d4a");
+  rect(bx - 12, top + 2, 24, 1 / d, "#4f8a6e");
+}
+
+const NAMEPLATE: Record<string, string[]> = {
+  B: ["111", "101", "110", "101", "111"],
+  O: ["111", "101", "101", "101", "111"],
+  S: ["111", "100", "111", "001", "111"],
+};
+
+// 보스를 가리는 책상 앞판과 상판 위 소품. 장면에서 앉은 보스보다 앞 층에 놓는다.
+export function drawDeskFront(c: CanvasRenderingContext2D, mode: LightMode) {
+  const d = BG_SCALE;
+  const { rect, dev, box } = pen(c);
+  const { x, top, panel, w, bottom } = BOSS_DESK;
+  const bx = BOSS_SEAT.x;
+  c.clearRect(0, 0, BG_WIDTH, BG_HEIGHT);
+  // 앞판: 호두나무 판넬 세 칸과 금 테두리, 가운데 BOSS 명패
+  box(x, panel, w, bottom - panel, WALNUT);
+  rect(x, panel, w, 1, GOLD[2]);
+  for (const px of [x + 3, x + 23, x + 43]) {
+    dev(px * d - 1, (panel + 4) * d - 1, 14 * d + 2, 11 * d + 2, WALNUT[0]);
+    rect(px, panel + 4, 14, 11, WALNUT[3]);
+    rect(px, panel + 4, 14, 1, WALNUT[4]);
+  }
+  box(bx - 9, panel + 6, 18, 7, GOLD);
+  let cx = Math.round((bx - 7.5) * d);
+  for (const ch of "BOSS") {
+    NAMEPLATE[ch].forEach((row, ry) =>
+      [...row].forEach((on, rx) => on === "1" && dev(cx + rx * 2, Math.round((panel + 7.5) * d) + ry * 2, 2, 2, "#5a3a10"))
+    );
+    cx += 8;
+  }
+  // 왼쪽: 은행원 스탠드, 결재 서류, 인주. 오른쪽: 전화기, 머그, 펜꽂이.
+  box(x + 4, top - 1, 2, 6, GOLD);
+  dev((x + 1) * d - 1, (top - 6) * d - 1, 10 * d + 2, 4 * d + 2, OUTLINE);
+  rect(x + 1, top - 6, 10, 4, "#2f8f5b");
+  rect(x + 1, top - 6, 10, 1, "#63d38e");
+  rect(x + 2, top - 2, 8, 1, mode === "night" ? "#5a5440" : "#fff3b0");
+  box(x + 12, top + 1, 10, 4, ramp(45, 0.2, 0.94));
+  rect(x + 13, top + 2, 7, 1 / d, "#99aaaa");
+  rect(x + 18, top + 2.5, 2, 2, "#d64a4a");
+  box(x + 13, top - 1, 10, 2, ramp(45, 0.2, 0.9));
+  box(x + 5, top + 2, 5, 3, ramp(0, 0.6, 0.45));
+  box(x + 47, top, 5, 5, ramp(0, 0, 0.95));
+  rect(x + 47, top, 5, 2, "#ffd23f");
+  rect(x + 52, top + 1, 1, 2, OUTLINE);
+  box(x + 38, top + 1, 7, 4, ramp(220, 0.1, 0.25));
+  rect(x + 39, top, 5, 1.5, "#2b2b3c");
+  box(x + 54, top - 2, 3, 6, GOLD);
+  rect(x + 54.5, top - 5, 1, 3, "#4a7ad6");
+  rect(x + 56, top - 4, 1, 2, "#e85d5d");
   applyLight(c, d, mode);
 }
 
@@ -401,6 +482,3 @@ function drawDesks(rect: Rect, dev: Rect, box: Box, ellipse: Ellipse, polygon: P
     }
   });
 }
-
-export const BG_WIDTH = SCENE_WIDTH * BG_SCALE;
-export const BG_HEIGHT = SCENE_HEIGHT * BG_SCALE;

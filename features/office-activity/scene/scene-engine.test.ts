@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { DOOR, SLOTS } from "./layout";
+import { BOSS_SEAT, DOOR, NO_GO, REPORT_SPOTS, SLOTS } from "./layout";
 import { SceneEngine, type SceneCharacter } from "./scene-engine";
 
 const work = (id: string, label = `Read · ${id}`): SceneCharacter => ({
@@ -188,7 +188,7 @@ describe("사무실 불", () => {
     expect(e.lit).toBe(true);
   });
 
-  test("캐릭터가 모두 나가고 서버도 불을 끄면 잠시 뒤에 꺼진다", () => {
+  test("캐릭터가 모두 나가고 서버도 불을 끄면 보스까지 퇴근한 뒤 잠시 뒤에 꺼진다", () => {
     const e = engine();
     e.sync([work("a")], true);
     run(e, 5);
@@ -196,7 +196,8 @@ describe("사무실 불", () => {
     run(e, 15);
     expect(e.walkers).toEqual([]);
 
-    run(e, 3);
+    run(e, 10);
+    expect(e.boss).toBeNull();
     expect(e.lit).toBe(false);
   });
 
@@ -219,5 +220,106 @@ describe("사무실 불", () => {
     e.sync([work("a")], true);
     e.step(0.05);
     expect(e.lit).toBe(true);
+  });
+});
+
+describe("일을 마친 직원의 결재", () => {
+  test("목록에서 빠진 직원은 보스 책상 옆 결재 자리에 잠시 섰다가 출입문으로 나간다", () => {
+    const e = engine();
+    e.sync([work("a")], true);
+    run(e, 6);
+    e.sync([], true);
+    expect(walker(e, "a").bubble).toBe("done");
+
+    let reported = false;
+    for (let i = 0; i < 300 && !reported; i++) {
+      e.step(0.05);
+      const w = e.walkers.find((x) => x.id === "a");
+      reported = Boolean(w && !w.moving && REPORT_SPOTS.some((p) => p.x === w.x && p.y === w.y));
+    }
+    expect(reported).toBe(true);
+    expect(walker(e, "a").flip).toBe(1);
+    expect(e.boss?.pose).toBe("approve");
+
+    run(e, 15);
+    expect(e.walkers).toEqual([]);
+  });
+
+  test("거절된 직원은 결재 없이 바로 나간다", () => {
+    const e = engine();
+    e.sync([waiting("a")], true);
+    run(e, 15);
+    e.sync([denied("a")], true);
+
+    for (let i = 0; i < 400; i++) {
+      e.step(0.05);
+      const w = e.walkers.find((x) => x.id === "a");
+      if (!w) break;
+      expect(REPORT_SPOTS.some((p) => p.x === w.x && p.y === w.y)).toBe(false);
+    }
+  });
+});
+
+describe("보스", () => {
+  test("첫 업무 전에는 보스가 없고, 불이 켜지면 자기 책상에 앉아 있다", () => {
+    const e = engine();
+    expect(e.boss).toBeNull();
+
+    e.sync([], true);
+    expect(e.boss).toMatchObject({ x: BOSS_SEAT.x, y: BOSS_SEAT.y, seated: true, pose: "plain" });
+  });
+
+  test("직원이 일하는 동안 생각하고, 허용 대기가 생기면 회의실을 보며 의아해한다", () => {
+    const e = engine();
+    e.sync([work("a")], true);
+    expect(e.boss?.pose).toBe("think");
+
+    e.sync([work("a"), waiting("b")], true);
+    expect(e.boss?.pose).toBe("confused");
+  });
+
+  test("모두 끝나면 보스가 일어나 출입문으로 나가고, 그동안은 불이 켜져 있다", () => {
+    const e = engine();
+    e.sync([], true);
+    e.sync([], false);
+    run(e, 1);
+
+    expect(e.boss).toMatchObject({ seated: false, moving: true });
+    expect(e.lit).toBe(true);
+    run(e, 10);
+    expect(e.boss).toBeNull();
+    expect(e.lit).toBe(false);
+  });
+
+  test("퇴근하던 보스는 새 업무가 들어오면 자리로 돌아온다", () => {
+    const e = engine();
+    e.sync([], true);
+    e.sync([], false);
+    run(e, 1);
+
+    e.sync([work("a")], true);
+    expect(e.boss).toMatchObject({ x: BOSS_SEAT.x, y: BOSS_SEAT.y, seated: true });
+  });
+});
+
+describe("보스 구역", () => {
+  test("직원은 일하고, 기다리고, 결재받고, 퇴근하는 내내 보스 구역에 발을 들이지 않는다", () => {
+    const e = engine();
+    const inside = (w: { x: number; y: number }) =>
+      w.x > NO_GO.x0 + 0.01 && w.x < NO_GO.x1 - 0.01 && w.y > NO_GO.y0 + 0.01 && w.y < NO_GO.y1 - 0.01;
+    const check = (seconds: number) => {
+      for (let i = 0; i < seconds * 20; i++) {
+        e.step(0.05);
+        for (const w of e.walkers) expect(inside(w), `${w.id} at ${w.x},${w.y}`).toBe(false);
+      }
+    };
+    e.sync([work("a"), work("b"), work("c")], true);
+    check(30);
+    e.sync([waiting("a"), work("b"), work("c")], true);
+    check(15);
+    e.sync([approved("a"), work("b")], true);
+    check(15);
+    e.sync([], false);
+    check(20);
   });
 });

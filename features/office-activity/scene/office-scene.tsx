@@ -4,8 +4,10 @@ import { useEffect, useReducer, useRef, useState } from "react";
 
 import { cn } from "cn";
 
-import { SceneEngine, type SceneCharacter, type Walker } from "./scene-engine";
-import { BG_HEIGHT, BG_WIDTH, drawOffice } from "./office-background";
+import { SceneEngine, type Boss, type SceneCharacter, type Walker } from "./scene-engine";
+import { BOSS_HEIGHT, BOSS_WIDTH, drawBoss } from "./boss-sprite";
+import { BOSS_DESK } from "./layout";
+import { BG_HEIGHT, BG_WIDTH, drawDeskFront, drawOffice } from "./office-background";
 import { brightnessAt } from "./lighting";
 import styles from "./office-scene.module.css";
 import { KIND_STYLE, SPRITE_HEIGHT, SPRITE_WIDTH, drawSprite, lookFor } from "./sprite";
@@ -25,13 +27,20 @@ export function OfficeScene({ characters, lit, hadWork, connected, alert }: Offi
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   const bgRef = useRef<HTMLCanvasElement>(null);
   const nightRef = useRef<HTMLCanvasElement>(null);
+  const frontRef = useRef<HTMLCanvasElement>(null);
+  const frontNightRef = useRef<HTMLCanvasElement>(null);
 
   // 노을 무렵과 불 꺼진 밤을 한 번씩 그려 두고, 불이 꺼지면 밤 그림이 서서히 드러난다.
+  // 보스 책상 앞판은 앉은 보스를 가리도록 캐릭터 층에 따로 그린다.
   useEffect(() => {
     const day = bgRef.current?.getContext("2d");
     const night = nightRef.current?.getContext("2d");
+    const front = frontRef.current?.getContext("2d");
+    const frontNight = frontNightRef.current?.getContext("2d");
     if (day) drawOffice(day, "sunset");
     if (night) drawOffice(night, "night");
+    if (front) drawDeskFront(front, "sunset");
+    if (frontNight) drawDeskFront(frontNight, "night");
   }, []);
 
   useEffect(() => {
@@ -53,6 +62,7 @@ export function OfficeScene({ characters, lit, hadWork, connected, alert }: Offi
   }, [engine]);
 
   const walkers = engine.walkers;
+  const boss = engine.boss;
   const empty = walkers.length === 0;
   const note = !connected
     ? "연결된 세션이 없어요"
@@ -79,11 +89,21 @@ export function OfficeScene({ characters, lit, hadWork, connected, alert }: Offi
         </div>
       </div>
       <div className={styles.layer}>
+        <canvas ref={frontRef} className={styles.bg} width={BG_WIDTH} height={BG_HEIGHT} style={{ zIndex: BOSS_DESK.bottom }} />
+        <canvas
+          ref={frontNightRef}
+          className={cn(styles.bg, styles.night)}
+          width={BG_WIDTH}
+          height={BG_HEIGHT}
+          style={{ zIndex: BOSS_DESK.bottom }}
+        />
+        {boss ? <BossSprite boss={boss} /> : null}
         {walkers.map((w) => (
           <WalkerSprite key={w.id} walker={w} />
         ))}
       </div>
       <div className={styles.layer}>
+        {boss ? <BossBubble boss={boss} /> : null}
         {walkers.map((w) => (
           <WalkerBubble key={w.id} walker={w} />
         ))}
@@ -126,6 +146,43 @@ function WalkerSprite({ walker }: { walker: Walker }) {
   );
 }
 
+function BossSprite({ boss }: { boss: Boss }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const context = ref.current?.getContext("2d");
+    if (context) drawBoss(context, { pose: boss.pose, seated: boss.seated, frame: boss.frame, moving: boss.moving });
+  });
+
+  return (
+    <div
+      className={cn(styles.char, styles.boss, boss.fading && styles.fading)}
+      style={{ ...position(boss), zIndex: Math.round(boss.y) }}
+      aria-label="보스"
+    >
+      <canvas
+        ref={ref}
+        width={BOSS_WIDTH}
+        height={BOSS_HEIGHT}
+        style={{ transform: `scaleX(${boss.flip})`, filter: `brightness(${brightnessAt(boss.x, boss.y)}) saturate(1.1)` }}
+      />
+    </div>
+  );
+}
+
+// 앉은 보스의 말풍선: 생각 중 …, 결재 중 수고했어요!, 허용 대기를 보며 ?.
+function BossBubble({ boss }: { boss: Boss }) {
+  if (!boss.seated || boss.pose === "plain") return null;
+  return (
+    <div
+      className={cn(styles.bubble, boss.pose === "confused" && styles.ask, boss.pose === "approve" && styles.glad, boss.pose === "think" && styles.think)}
+      style={position(boss)}
+    >
+      {boss.pose === "confused" ? <b>?</b> : boss.pose === "approve" ? "수고했어요!" : "…"}
+    </div>
+  );
+}
+
 function WalkerBubble({ walker }: { walker: Walker }) {
   const edge = walker.x < 70 ? styles.edgeLeft : walker.x > 262 ? styles.edgeRight : "";
   const kindColor = { "--kind": KIND_STYLE[walker.kind].accent } as React.CSSProperties;
@@ -137,7 +194,7 @@ function WalkerBubble({ walker }: { walker: Walker }) {
         edge,
         walker.bubble === "ask" && styles.ask,
         walker.bubble === "sad" && styles.sad,
-        walker.bubble === "glad" && styles.glad,
+        (walker.bubble === "glad" || walker.bubble === "done") && styles.glad,
         walker.bubble === "stop" && styles.stop
       )}
       style={{ ...position(walker), ...kindColor, opacity: walker.fading ? 0 : 1 }}
@@ -151,6 +208,8 @@ function WalkerBubble({ walker }: { walker: Walker }) {
         "거절됨 · 퇴근할게요"
       ) : walker.bubble === "glad" ? (
         "허용됨 · 일 마쳤어요"
+      ) : walker.bubble === "done" ? (
+        "일 마쳤어요"
       ) : walker.bubble === "stop" ? (
         "중단됨 · 퇴근할게요"
       ) : (
@@ -163,6 +222,6 @@ function WalkerBubble({ walker }: { walker: Walker }) {
   );
 }
 
-function position(walker: Walker): React.CSSProperties {
-  return { "--x": walker.x.toFixed(2), "--y": walker.y.toFixed(2) } as React.CSSProperties;
+function position(at: { x: number; y: number }): React.CSSProperties {
+  return { "--x": at.x.toFixed(2), "--y": at.y.toFixed(2) } as React.CSSProperties;
 }
