@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { cn } from "cn";
 
@@ -121,14 +121,15 @@ export function OfficeScene({ characters, lit, hadWork, connected, alert }: Offi
 
 function WalkerSprite({ walker }: { walker: Walker }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const look = lookFor(walker.id);
+  const look = useMemo(() => lookFor(walker.id), [walker.id]);
+  const { kind, expr, moving } = walker;
+  // 걷는 동작은 네 칸을 돈다. 모습이 바뀔 때만 다시 그린다(도트 하나하나를 계산하므로 매 프레임 그리면 무겁다).
+  const frame = moving ? walker.frame % 4 : 0;
 
   useEffect(() => {
     const context = ref.current?.getContext("2d");
-    if (context) {
-      drawSprite(context, { kind: walker.kind, look, expr: walker.expr, frame: walker.frame, moving: walker.moving });
-    }
-  });
+    if (context) drawSprite(context, { kind, look, expr, frame, moving });
+  }, [kind, look, expr, frame, moving]);
 
   return (
     <div
@@ -148,11 +149,13 @@ function WalkerSprite({ walker }: { walker: Walker }) {
 
 function BossSprite({ boss }: { boss: Boss }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const { pose, seated, moving } = boss;
+  const frame = moving ? boss.frame % 4 : 0;
 
   useEffect(() => {
     const context = ref.current?.getContext("2d");
-    if (context) drawBoss(context, { pose: boss.pose, seated: boss.seated, frame: boss.frame, moving: boss.moving });
-  });
+    if (context) drawBoss(context, { pose, seated, frame, moving });
+  }, [pose, seated, frame, moving]);
 
   return (
     <div
@@ -184,7 +187,8 @@ function BossBubble({ boss }: { boss: Boss }) {
 }
 
 function WalkerBubble({ walker }: { walker: Walker }) {
-  const edge = walker.x < 70 ? styles.edgeLeft : walker.x > 262 ? styles.edgeRight : "";
+  // 화면 가장자리나 보스 옆(결재 중)에서는 말풍선을 안쪽·보스 반대쪽으로 치우친다.
+  const edge = walker.x < 70 ? styles.edgeLeft : walker.x > 262 || walker.reporting ? styles.edgeRight : "";
   const kindColor = { "--kind": KIND_STYLE[walker.kind].accent } as React.CSSProperties;
 
   return (

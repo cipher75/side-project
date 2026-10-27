@@ -262,6 +262,25 @@ describe("일을 마친 직원의 결재", () => {
     expect(e.walkers).toEqual([]);
   });
 
+  test("결재 자리가 모두 차면 남은 직원은 겹쳐 서지 않고 자리가 빌 때까지 기다린다", () => {
+    const e = engine();
+    const ids = ["a", "b", "c", "d"];
+    e.sync(ids.map((id) => work(id)), true);
+    run(e, 6);
+    e.sync([], true);
+
+    let reportedD = false;
+    for (let i = 0; i < 600; i++) {
+      e.step(0.05);
+      const standing = e.walkers.filter((w) => !w.moving && REPORT_SPOTS.some((p) => p.x === w.x && p.y === w.y));
+      const spots = new Set(standing.map((w) => `${w.x},${w.y}`));
+      expect(spots.size).toBe(standing.length);
+      if (standing.some((w) => w.id === "d")) reportedD = true;
+    }
+    expect(reportedD).toBe(true);
+    expect(e.walkers).toEqual([]);
+  });
+
   test("거절된 직원은 결재 없이 바로 나간다", () => {
     const e = engine();
     e.sync([waiting("a")], true);
@@ -278,12 +297,12 @@ describe("일을 마친 직원의 결재", () => {
 });
 
 describe("보스", () => {
-  test("첫 업무 전에는 보스가 없고, 불이 켜지면 자기 책상에 앉아 있다", () => {
+  test("첫 업무 전에는 보스가 없고, 불이 켜지면 자기 책상에 앉아 생각한다", () => {
     const e = engine();
     expect(e.boss).toBeNull();
 
     e.sync([], true);
-    expect(e.boss).toMatchObject({ x: BOSS_SEAT.x, y: BOSS_SEAT.y, seated: true, pose: "plain" });
+    expect(e.boss).toMatchObject({ x: BOSS_SEAT.x, y: BOSS_SEAT.y, seated: true, pose: "think" });
   });
 
   test("직원이 일하는 동안 생각하고, 허용 대기가 생기면 회의실을 보며 의아해한다", () => {
@@ -308,14 +327,20 @@ describe("보스", () => {
     expect(e.lit).toBe(false);
   });
 
-  test("퇴근하던 보스는 새 업무가 들어오면 자리로 돌아온다", () => {
+  test("퇴근하던 보스는 새 업무가 들어오면 순간이동하지 않고 걸어서 자리로 돌아온다", () => {
     const e = engine();
     e.sync([], true);
     e.sync([], false);
-    run(e, 1);
+    run(e, 2);
+    const away = { x: e.boss!.x, y: e.boss!.y };
 
     e.sync([work("a")], true);
-    expect(e.boss).toMatchObject({ x: BOSS_SEAT.x, y: BOSS_SEAT.y, seated: true });
+    e.step(0.05);
+    expect(e.boss).toMatchObject({ seated: false, moving: true });
+    expect(Math.hypot(e.boss!.x - away.x, e.boss!.y - away.y)).toBeLessThan(3);
+
+    run(e, 8);
+    expect(e.boss).toMatchObject({ x: BOSS_SEAT.x, y: BOSS_SEAT.y, seated: true, pose: "think" });
   });
 });
 
