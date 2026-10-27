@@ -1,6 +1,7 @@
 import type { CharacterKind } from "../types";
 import type { Expression } from "./scene-engine";
-import { BAYER2, mix, ramp, rgbOf } from "./palette";
+import { mix, ramp } from "./palette";
+import { ellipse, pixelArt, type Add, type Blk, type Dot, type Ramp, type Test } from "./pixel-art";
 
 // 64 x 72 도트 캐릭터: 큰 머리와 작은 몸. 모양은 32 x 36 설계 단위로 잡고 2배로 찍는다.
 // 부위마다 5단 명암을 주고, 외곽선은 검정 대신 각 부위의 어두운 색으로 그린다.
@@ -8,7 +9,6 @@ const K = 2;
 export const SPRITE_WIDTH = 32 * K;
 export const SPRITE_HEIGHT = 36 * K;
 
-type Ramp = string[];
 
 export const KIND_STYLE: Record<CharacterKind, { tunic: Ramp; hat: Ramp; accent: string }> = {
   tool: { tunic: ramp(145, 0.55, 0.44), hat: ramp(150, 0.6, 0.47), accent: "#35b36a" },
@@ -54,36 +54,8 @@ export type SpriteOptions = {
   moving: boolean;
 };
 
-type Test = (u: number, v: number) => boolean;
-// 명암 기준이 되는 부위의 중심과 반지름(설계 단위).
-type Light = [number, number, number, number];
-
-const ellipse = (cx: number, cy: number, rx: number, ry: number): Test => (u, v) =>
-  ((u - cx) / rx) ** 2 + ((v - cy) / ry) ** 2 <= 1;
-
 export function drawSprite(c: CanvasRenderingContext2D, o: SpriteOptions) {
-  const W = SPRITE_WIDTH;
-  const H = SPRITE_HEIGHT;
-  const part = new Int16Array(W * H).fill(-1);
-  const level = new Float32Array(W * H);
-  const parts: { ramp: Ramp; inner: boolean; outline: string }[] = [];
-
-  // 나중에 더한 부위가 앞에 온다. 빛은 왼쪽 위에서 들어온다.
-  const add = (r: Ramp, test: Test, [cx, cy, rx, ry]: Light, opt: { inner?: boolean; bias?: number } = {}) => {
-    const id = parts.length;
-    parts.push({ ramp: r, inner: opt.inner !== false, outline: mix(r[0], "#1a1030", 0.45) });
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
-        const u = (x + 0.5) / K;
-        const v = (y + 0.5) / K;
-        if (!test(u, v)) continue;
-        const nx = (u - cx) / rx;
-        const ny = (v - cy) / ry;
-        part[y * W + x] = id;
-        level[y * W + x] = 0.55 + (nx * -0.51 + ny * -0.86) * 0.42 - Math.max(0, Math.hypot(nx, ny) - 0.8) * 0.5 + (opt.bias ?? 0);
-      }
-    }
-  };
+  const { add, paint } = pixelArt(32, 36, K);
 
   const style = KIND_STYLE[o.kind];
   const { look } = o;
@@ -119,74 +91,27 @@ export function drawSprite(c: CanvasRenderingContext2D, o: SpriteOptions) {
   }, [12, 7, 12, 10]);
   addHat(add, o.kind, b);
 
-  const img = c.createImageData(W, H);
-  const put = (i: number, hex: string, alpha = 255) => {
-    const [r, g, bl] = rgbOf(hex);
-    img.data.set([r, g, bl, alpha], i * 4);
-  };
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      const u = (x + 0.5) / K;
-      const v = (y + 0.5) / K;
-      if (((u - 16) / 9.5) ** 2 + ((v - 34.6) / 1.6) ** 2 <= 1) img.data.set([20, 12, 30, 70], (y * W + x) * 4);
+  // 얼굴과 장식은 몸과 함께 들썩이도록 b만큼 올려 찍는다.
+  paint(c, ({ blk, dot }) => {
+    drawFace(blk, dot, o.expr, look);
+    blk(14.6, 22.4, 2.8, 1, "#fffdf3");
+    blk(15.4, 23.4, 1.2, 1, "#fffdf3");
+    blk(15, 28.5, 2, 1.2, "#ffd34d");
+    if (o.kind === "tool") {
+      blk(14.8, 5.6, 2.4, 2, "#fffdf3");
+      blk(15.4, 6.1, 1.2, 1, style.hat[1]);
+    } else if (o.kind === "skill") {
+      blk(15, 3.6, 1, 3, "#ffe066");
+      blk(14, 4.6, 3, 1, "#ffe066");
+      dot(30, 7, "#ffffff");
+    } else {
+      for (let x = 8; x < 56; x += 3) for (let y = 18; y < 22; y++) dot(x, y, mix("#ff9a7a", "#c0503a", 0.5));
+      for (let i = 0; i < 6; i++) blk(5 + i * 1.1, 18.2 + i * 0.5, 1, 1, INK);
+      blk(11.4, 21, 1.6, 1.4, "#ff5a5a");
     }
-  }
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      const i = y * W + x;
-      const near = [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, y > 0 ? i - W : -1, y < H - 1 ? i + W : -1].filter((q) => q >= 0);
-      if (part[i] < 0) {
-        // 빈 칸이 부위와 닿으면 가장 앞 부위의 외곽선 색을 찍는다.
-        let front = -1;
-        for (const q of near) if (part[q] > front) front = part[q];
-        if (front >= 0) put(i, parts[front].outline);
-        continue;
-      }
-      const p = parts[part[i]];
-      const n = p.ramp.length;
-      const L = level[i] * (n - 1) + (BAYER2[(x & 1) + (y & 1) * 2] / 4 - 0.375) * 0.9;
-      // 뒤쪽 부위와 맞닿은 앞 부위 가장자리는 가장 어두운 색으로 안쪽 선을 긋는다.
-      const edge = p.inner && near.some((q) => part[q] >= 0 && part[q] < part[i]);
-      put(i, edge ? p.ramp[0] : p.ramp[Math.max(0, Math.min(n - 1, Math.round(L)))]);
-    }
-  }
-
-  // 얼굴과 장식은 도트를 직접 찍는다. blk는 설계 단위, dot은 실제 도트 단위다.
-  const blk = (u: number, v: number, w: number, h: number, hex: string) => {
-    const x0 = Math.round(u * K);
-    const y0 = Math.round((v + b) * K);
-    for (let y = y0; y < y0 + Math.max(1, Math.round(h * K)); y++) {
-      for (let x = x0; x < x0 + Math.max(1, Math.round(w * K)); x++) {
-        if (x >= 0 && y >= 0 && x < W && y < H) put(y * W + x, hex);
-      }
-    }
-  };
-  const dot = (x: number, y: number, hex: string) => {
-    const yy = y + Math.round(b * K);
-    if (x >= 0 && yy >= 0 && x < W && yy < H) put(yy * W + x, hex);
-  };
-  drawFace(blk, dot, o.expr, look);
-  blk(14.6, 22.4, 2.8, 1, "#fffdf3");
-  blk(15.4, 23.4, 1.2, 1, "#fffdf3");
-  blk(15, 28.5, 2, 1.2, "#ffd34d");
-  if (o.kind === "tool") {
-    blk(14.8, 5.6, 2.4, 2, "#fffdf3");
-    blk(15.4, 6.1, 1.2, 1, style.hat[1]);
-  } else if (o.kind === "skill") {
-    blk(15, 3.6, 1, 3, "#ffe066");
-    blk(14, 4.6, 3, 1, "#ffe066");
-    dot(30, 7, "#ffffff");
-  } else {
-    for (let x = 8; x < 56; x += 3) for (let y = 18; y < 22; y++) dot(x, y, mix("#ff9a7a", "#c0503a", 0.5));
-    for (let i = 0; i < 6; i++) blk(5 + i * 1.1, 18.2 + i * 0.5, 1, 1, INK);
-    blk(11.4, 21, 1.6, 1.4, "#ff5a5a");
-  }
-  for (let x = 16; x < 26; x++) dot(x, 20 - Math.round(Math.abs(x - 21) * 0.4), look.hair[4]);
-  c.clearRect(0, 0, W, H);
-  c.putImageData(img, 0, 0);
+    for (let x = 16; x < 26; x++) dot(x, 20 - Math.round(Math.abs(x - 21) * 0.4), look.hair[4]);
+  }, { shadow: [16, 34.6, 9.5, 1.6], dy: b });
 }
-
-type Add = (r: Ramp, test: Test, light: Light, opt?: { inner?: boolean; bias?: number }) => void;
 
 function addHat(add: Add, kind: CharacterKind, b: number) {
   const hat = KIND_STYLE[kind].hat;
@@ -209,9 +134,6 @@ function addHat(add: Add, kind: CharacterKind, b: number) {
     add(HEADSET, ellipse(27.7, 15.6 + b, 2.1, 3.1), [27, 14, 2.5, 3.5]);
   }
 }
-
-type Blk = (u: number, v: number, w: number, h: number, hex: string) => void;
-type Dot = (x: number, y: number, hex: string) => void;
 
 function drawFace(blk: Blk, dot: Dot, expr: Expression, look: SpriteLook) {
   const blush = mix(look.skin[2], "#ff5f87", 0.45);
