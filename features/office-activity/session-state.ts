@@ -38,10 +38,15 @@ export function applyHookEvent(
     case "OfficeConnect":
       session = { ...session, connected: true };
       break;
+    case "UserPromptSubmit":
+      session = { ...session, connected: true, inTurn: true };
+      break;
     case "PreToolUse":
       if (!session.characters.some((c) => c.id === text(payload.tool_use_id))) {
         session = { ...session, connected: true, characters: [...session.characters, startCharacter(payload, now)] };
       }
+      // 턴 시작(UserPromptSubmit)을 놓친 세션도 도구 호출을 보면 턴 중인 것을 안다.
+      session = { ...session, inTurn: true };
       break;
     case "UserPromptExpansion":
       session = { ...session, connected: true, characters: addSlashSkill(session.characters, payload, now) };
@@ -83,10 +88,10 @@ export function applyHookEvent(
       break;
     // 턴이 끝나면 본 세션의 허용 창은 남지 않으므로, 시작을 보지 못한 세션도 이제 상태를 안다.
     case "Stop":
-      session = { ...finishWorking(cancelWaiting(session, now)), priorUnknown: false };
+      session = { ...finishWorking(cancelWaiting(session, now)), priorUnknown: false, inTurn: false };
       break;
     case "SessionEnd":
-      session = { ...finishAll(session), connected: false, priorUnknown: false };
+      session = { ...finishAll(session), connected: false, priorUnknown: false, inTurn: false };
       break;
     default:
       session = { ...session, connected: true };
@@ -178,10 +183,11 @@ function sessionName(payload: Payload): string | undefined {
 }
 
 // 퇴근 중인(approved, denied, cancelled) 캐릭터는 불을 켜 두지 않는다. 화면은 그 캐릭터가 문을 나갈 때까지 불을 유지한다.
+// 턴이 진행 중이면 도구 호출 사이(Claude가 생각하는 동안)에도 켜 둔다. 그래야 불 꺼짐이 "지시한 일이 모두 끝남"을 뜻한다.
 // 그전 상태를 모르는 세션은 남은 허용 대기가 있을 수 있으므로 "모두 끝남"을 뜻하는 불 꺼짐을 보이지 않는다.
 function isLit(session: Session): boolean {
   const active = session.characters.some(isActive);
-  return session.connected && (active || session.doneCount === 0 || session.priorUnknown === true);
+  return session.connected && (active || session.inTurn === true || session.doneCount === 0 || session.priorUnknown === true);
 }
 
 function isEnded(c: Character): boolean {

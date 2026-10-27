@@ -26,10 +26,13 @@ export type Walker = {
   frame: number;
   moving: boolean;
   fading: boolean;
+  // 보스 책상 옆에서 결재받는 중. 말풍선이 보스를 가리지 않게 보스 반대쪽으로 펼친다.
+  reporting: boolean;
 };
 
 // 보스의 모습: 직원이 일하는 동안 생각에 잠기고(think), 결재할 때 도장을 들고(approve),
-// 허용 대기가 생기면 회의실을 보며 의아해한다(confused). 아무도 없으면 담담하다(plain).
+// 허용 대기가 생기면 회의실을 보며 의아해한다(confused). 직원이 없어도 턴이 진행 중이면 생각에 잠기고,
+// 턴이 끝나 퇴근할 때는 담담하다(plain).
 export type BossPose = "think" | "approve" | "confused" | "plain";
 
 export type Boss = {
@@ -66,7 +69,7 @@ type Internal = Walker &
     linger: number;
   };
 
-type BossState = Boss & Mover & { phase: "seated" | "leaving" | "gone"; fadeTime: number };
+type BossState = Boss & Mover & { phase: "seated" | "leaving" | "returning" | "gone"; fadeTime: number };
 
 const LIGHTS_OFF_DELAY = 1.5;
 const FADE_OUT = 0.4;
@@ -74,6 +77,7 @@ const SAD_PAUSE = 1.2;
 const GLAD_PAUSE = 1.2;
 const STOP_PAUSE = 1.2;
 const REPORT_PAUSE = 1.4;
+const REPORT_RETRY = 0.5;
 const FRAME_TIME = 0.17;
 // 일을 마친 캐릭터가 바로 나가지 않고 더 돌아다니는 시간. 짧은 호출도 화면에서 볼 수 있게 한다.
 const LINGER = 3;
@@ -153,9 +157,16 @@ export class SceneEngine {
   private turnOn() {
     this.lit = true;
     this.emptyTime = 0;
-    // 일이 들어오면 보스는 늘 자기 책상에 앉아 있다. 퇴근하던 중이었어도 자리로 돌아간다.
-    if (this.chief.phase !== "seated") {
-      Object.assign(this.chief, { ...BOSS_SEAT, seated: true, moving: false, fading: false, path: [], phase: "seated", fadeTime: 0 });
+    const b = this.chief;
+    // 퇴근하던 보스는 왔던 길을 되짚어 걸어서 자리로 돌아간다.
+    if (b.phase === "leaving" && !b.fading) {
+      const exit = BOSS_EXIT[BOSS_EXIT.length - 1];
+      b.path = [...route(b, exit), ...BOSS_EXIT.slice(0, -1).reverse(), BOSS_SEAT];
+      b.phase = "returning";
+      b.moving = true;
+    } else if (b.phase === "gone" || b.phase === "leaving") {
+      // 이미 문을 나섰거나 나서는 중이면 화면에 없으므로, 처음처럼 자리에 앉혀 둔다.
+      Object.assign(b, { ...BOSS_SEAT, seated: true, moving: false, fading: false, path: [], phase: "seated", fadeTime: 0 });
     }
   }
 
@@ -169,6 +180,10 @@ export class SceneEngine {
 
   private advanceBoss(dt: number) {
     const b = this.chief;
+    if (b.phase === "returning") {
+      if (this.move(b, dt)) Object.assign(b, { ...BOSS_SEAT, seated: true, flip: 1, phase: "seated" });
+      return;
+    }
     if (b.phase !== "leaving") return;
     if (b.fading) {
       b.fadeTime += dt;
@@ -183,6 +198,8 @@ export class SceneEngine {
     if (phases.has("to-wait") || phases.has("waiting")) return "confused";
     if (phases.has("reporting")) return "approve";
     if (phases.has("to-work") || phases.has("idle") || phases.has("to-report")) return "think";
+    // 직원이 없어도 서버가 불을 켜 두었으면 턴이 진행 중이다. Claude가 다음 일을 생각하는 중이다.
+    if (this.serverLit) return "think";
     return "plain";
   }
 
@@ -199,6 +216,7 @@ export class SceneEngine {
       frame: 0,
       moving: false,
       fading: false,
+      reporting: false,
       phase: "to-work",
       path: [],
       pause: 0,
@@ -248,17 +266,22 @@ export class SceneEngine {
     w.expr = "confused";
     w.bubble = "ask";
     w.spot = -1;
-    w.slot = this.freeSlot(w);
+    // 회의실 자리가 모두 차면 첫 자리에 겹쳐서라도 선다. ?가 보이지 않는 것보다 낫다.
+    w.slot = Math.max(0, this.freeIndex(SLOTS.length, w, "slot"));
     this.walkTo(w, SLOTS[w.slot], "to-wait");
   }
 
-  private goReport(w: Internal) {
+  // 결재 자리로 간다. 자리가 모두 차 있으면 false를 돌려주고, 부른 쪽이 잠시 뒤 다시 시도한다.
+  private goReport(w: Internal): boolean {
     w.expr = "happy";
     if (w.bubble !== "glad") w.bubble = "done";
+    const spot = this.freeIndex(REPORT_SPOTS.length, w, "spot");
+    if (spot < 0) return false;
     w.slot = -1;
     w.linger = -1;
-    w.spot = this.freeSpot(w);
-    this.walkTo(w, REPORT_SPOTS[w.spot], "to-report");
+    w.spot = spot;
+    this.walkTo(w, REPORT_SPOTS[spot], "to-report");
+    return true;
   }
 
   private startSad(w: Internal) {
@@ -279,6 +302,7 @@ export class SceneEngine {
     w.bubble = bubble;
     w.slot = -1;
     w.spot = -1;
+    w.reporting = false;
     w.moving = false;
     w.path = [];
     w.pause = pause;
@@ -299,6 +323,7 @@ export class SceneEngine {
 
   // 보스 구역을 돌아가는 길을 따라 걷는다.
   private walkTo(w: Internal, goal: Point, phase: Phase) {
+    w.reporting = false;
     w.path = route(w, goal);
     w.phase = phase;
     w.moving = true;
@@ -307,7 +332,8 @@ export class SceneEngine {
   private advance(w: Internal, dt: number) {
     if (w.linger >= 0) {
       w.linger -= dt;
-      if (w.linger < 0) this.goReport(w);
+      // 결재 자리가 비기를 기다리며 조금 더 돌아다닌다.
+      if (w.linger < 0 && !this.goReport(w)) w.linger = REPORT_RETRY;
     }
     if (w.phase === "idle") {
       w.pause -= dt;
@@ -317,7 +343,7 @@ export class SceneEngine {
       if (w.pause <= 0) this.leave(w);
     } else if (w.phase === "glad") {
       w.pause -= dt;
-      if (w.pause <= 0) this.goReport(w);
+      if (w.pause <= 0 && !this.goReport(w)) w.pause = REPORT_RETRY;
     }
     if (!w.moving) {
       if (w.fading) this.fade(w, dt);
@@ -364,6 +390,7 @@ export class SceneEngine {
     } else if (w.phase === "to-report") {
       // 보스가 있는 오른쪽을 보고 선다.
       w.phase = "reporting";
+      w.reporting = true;
       w.flip = 1;
       w.pause = REPORT_PAUSE;
     } else if (w.phase === "leaving") {
@@ -382,15 +409,10 @@ export class SceneEngine {
     return options[Math.floor(this.rng() * options.length)];
   }
 
-  private freeSlot(w: Internal): number {
-    const used = new Set(this.items.filter((o) => o !== w && o.slot >= 0).map((o) => o.slot));
-    const free = SLOTS.findIndex((_, i) => !used.has(i));
-    return free === -1 ? 0 : free;
-  }
-
-  private freeSpot(w: Internal): number {
-    const used = new Set(this.items.filter((o) => o !== w && o.spot >= 0).map((o) => o.spot));
-    const free = REPORT_SPOTS.findIndex((_, i) => !used.has(i));
-    return free === -1 ? 0 : free;
+  // 다른 캐릭터가 쓰지 않는 자리 번호. 모두 차 있으면 -1.
+  private freeIndex(count: number, w: Internal, key: "slot" | "spot"): number {
+    const used = new Set(this.items.filter((o) => o !== w && o[key] >= 0).map((o) => o[key]));
+    for (let i = 0; i < count; i++) if (!used.has(i)) return i;
+    return -1;
   }
 }

@@ -1,5 +1,6 @@
 import type { BossPose } from "./scene-engine";
-import { BAYER2, mix, ramp, rgbOf } from "./palette";
+import { mix, ramp } from "./palette";
+import { ellipse, pixelArt, type Blk, type Dot } from "./pixel-art";
 
 // 64 x 72 도트 보스: 은발, 둥근 금테 안경, 콧수염, 남색 정장에 빨간 넥타이.
 // 앉아 있을 때는 책상 상판 높이에서 몸을 잘라 그리고, 퇴근할 때는 다리까지 그려 걷게 한다.
@@ -23,14 +24,8 @@ const DESK_CUT = 27.2;
 
 export type BossSpriteOptions = { pose: BossPose; seated: boolean; frame: number; moving: boolean };
 
-type Ramp = string[];
-type Test = (u: number, v: number) => boolean;
-type Light = [number, number, number, number];
 type Arm = "desk" | "chin" | "stamp" | "side";
 type Face = "think" | "happy" | "confused" | "plain";
-
-const ellipse = (cx: number, cy: number, rx: number, ry: number): Test => (u, v) =>
-  ((u - cx) / rx) ** 2 + ((v - cy) / ry) ** 2 <= 1;
 
 function look(o: BossSpriteOptions): { face: Face; arm: Arm; turn: number } {
   if (!o.seated) return { face: "plain", arm: "side", turn: 0 };
@@ -42,26 +37,9 @@ function look(o: BossSpriteOptions): { face: Face; arm: Arm; turn: number } {
 }
 
 export function drawBoss(c: CanvasRenderingContext2D, o: BossSpriteOptions) {
-  const W = BOSS_WIDTH;
-  const H = BOSS_HEIGHT;
-  const part = new Int16Array(W * H).fill(-1);
-  const level = new Float32Array(W * H);
-  const parts: { ramp: Ramp; outline: string }[] = [];
-  const add = (r: Ramp, test: Test, [cx, cy, rx, ry]: Light, bias = 0) => {
-    const id = parts.length;
-    parts.push({ ramp: r, outline: mix(r[0], "#1a1030", 0.45) });
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
-        const u = (x + 0.5) / K;
-        const v = (y + 0.5) / K;
-        if (!test(u, v)) continue;
-        const nx = (u - cx) / rx;
-        const ny = (v - cy) / ry;
-        part[y * W + x] = id;
-        level[y * W + x] = 0.55 + (nx * -0.51 + ny * -0.86) * 0.42 - Math.max(0, Math.hypot(nx, ny) - 0.8) * 0.5 + bias;
-      }
-    }
-  };
+  const { add: addPart, paint } = pixelArt(32, 36, K);
+  const add = (r: string[], test: (u: number, v: number) => boolean, light: [number, number, number, number], bias = 0) =>
+    addPart(r, test, light, { bias });
 
   const { face, arm, turn: t } = look(o);
   const cut = o.seated ? DESK_CUT : 31;
@@ -110,64 +88,21 @@ export function drawBoss(c: CanvasRenderingContext2D, o: BossSpriteOptions) {
     add(STAMP, (u, v) => u >= 21.6 && u <= 25.2 && v >= 22.2 && v <= 23.8, [23, 22.5, 2, 1]);
   }
 
-  const img = c.createImageData(W, H);
-  const put = (i: number, hex: string, alpha = 255) => {
-    const [r, g, b] = rgbOf(hex);
-    img.data.set([r, g, b, alpha], i * 4);
-  };
-  if (!o.seated) {
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
+  paint(c, ({ blk, dot }) => {
+    // 셔츠 깃, 빨간 넥타이, 금색 행커치프
+    for (let y = Math.round(20.6 * K); y < cut * K; y++) {
+      for (let x = 0; x < BOSS_WIDTH; x++) {
         const u = (x + 0.5) / K;
         const v = (y + 0.5) / K;
-        if (((u - 16) / 9.5) ** 2 + ((v - 34.6) / 1.6) ** 2 <= 1) img.data.set([20, 12, 30, 70], (y * W + x) * 4);
+        if (Math.abs(u - 16) <= (v - 20.6) * 0.62 && v < 25) dot(x, y, "#fbfbf2");
+        if (v > 21.6 && Math.abs(u - 16) <= 0.7 + (v - 21.6) * 0.12) dot(x, y, v < 22.6 ? "#a82835" : "#d63a4a");
       }
     }
-  }
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      const i = y * W + x;
-      const near = [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, y > 0 ? i - W : -1, y < H - 1 ? i + W : -1].filter((q) => q >= 0);
-      if (part[i] < 0) {
-        let front = -1;
-        for (const q of near) if (part[q] > front) front = part[q];
-        if (front >= 0) put(i, parts[front].outline);
-        continue;
-      }
-      const p = parts[part[i]];
-      const n = p.ramp.length;
-      const L = level[i] * (n - 1) + (BAYER2[(x & 1) + (y & 1) * 2] / 4 - 0.375) * 0.9;
-      const edge = near.some((q) => part[q] >= 0 && part[q] < part[i]);
-      put(i, edge ? p.ramp[0] : p.ramp[Math.max(0, Math.min(n - 1, Math.round(L)))]);
-    }
-  }
-  const dot = (x: number, y: number, hex: string) => {
-    if (x >= 0 && y >= 0 && x < W && y < H) put(y * W + x, hex);
-  };
-  const blk = (u: number, v: number, w: number, h: number, hex: string) => {
-    const x0 = Math.round(u * K);
-    const y0 = Math.round(v * K);
-    for (let y = y0; y < y0 + Math.max(1, Math.round(h * K)); y++) for (let x = x0; x < x0 + Math.max(1, Math.round(w * K)); x++) dot(x, y, hex);
-  };
-
-  // 셔츠 깃, 빨간 넥타이, 금색 행커치프
-  for (let y = Math.round(20.6 * K); y < cut * K; y++) {
-    for (let x = 0; x < W; x++) {
-      const u = (x + 0.5) / K;
-      const v = (y + 0.5) / K;
-      if (Math.abs(u - 16) <= (v - 20.6) * 0.62 && v < 25) put(y * W + x, "#fbfbf2");
-      if (v > 21.6 && Math.abs(u - 16) <= 0.7 + (v - 21.6) * 0.12) put(y * W + x, v < 22.6 ? "#a82835" : "#d63a4a");
-    }
-  }
-  blk(20.2, 23.4, 1.8, 0.9, "#ffd23f");
-  drawFace(blk, dot, face, t);
-  for (let x = 12; x < 22; x++) dot(x + 8, 6 + Math.round(Math.abs(x - 17) * 0.4), HAIR[4]);
-  c.clearRect(0, 0, W, H);
-  c.putImageData(img, 0, 0);
+    blk(20.2, 23.4, 1.8, 0.9, "#ffd23f");
+    drawFace(blk, dot, face, t);
+    for (let x = 12; x < 22; x++) dot(x + 8, 6 + Math.round(Math.abs(x - 17) * 0.4), HAIR[4]);
+  }, { shadow: o.seated ? undefined : [16, 34.6, 9.5, 1.6] });
 }
-
-type Blk = (u: number, v: number, w: number, h: number, hex: string) => void;
-type Dot = (x: number, y: number, hex: string) => void;
 
 function drawFace(blk: Blk, dot: Dot, face: Face, t: number) {
   const eyes = [10.6 + t, 19.4 + t];
