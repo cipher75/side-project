@@ -84,9 +84,11 @@ export function OfficeBoard({
 
       {state.order.length > 0 ? (
         <Tabs value={selectedId} onValueChange={(value) => setPicked(String(value))}>
-          <TabsList className="h-auto flex-wrap justify-start">
+          {/* 탭 목록의 기본 높이(h-9)는 한 줄용이라, 줄이 늘어나면 탭이 겹친다. 넓은 화면에서는 줄바꿈한 만큼
+              높이를 갖게 하고, 좁은 화면에서는 한 줄로 두고 옆으로 밀어 본다. */}
+          <TabsList className="w-full justify-start rounded-2xl group-data-horizontal/tabs:h-auto max-sm:overflow-x-auto sm:w-fit sm:flex-wrap">
             {state.order.map((id) => (
-              <TabsTrigger key={id} value={id}>
+              <TabsTrigger key={id} value={id} className="h-8 flex-none">
                 <StatusDot session={state.sessions[id]} />
                 {state.sessions[id].name}
                 <span className="text-xs font-normal text-muted-foreground">
